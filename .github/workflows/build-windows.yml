@@ -504,7 +504,14 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          key: windows-x64-vulkan-v2
+          # v3: cpu build; also cache the sherpa-onnx prebuilt libs that the
+          # crate's build script downloads into target/ — rust-cache's pruning
+          # dropped them while keeping the build-script fingerprint, so the
+          # next build linked against a directory that no longer existed
+          # (LNK1181 on sherpa-onnx-c-api.lib).
+          key: windows-x64-cpu-v3
+          cache-directories: |
+            target/sherpa-onnx-prebuilt
 
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
@@ -670,11 +677,13 @@ jobs:
         shell: pwsh
         run: |
           # sherpa-onnx is linked with the `shared` feature (see src-tauri
-          # Cargo.toml), so the app needs these DLLs at runtime. Version must
-          # match the sherpa-onnx crate version. Declared as Windows bundle
-          # resources in tauri.windows.conf.json.
-          $v = "1.13.0"
-          $name = "sherpa-onnx-v$v-win-x64-shared-MD-Release"
+          # Cargo.toml), so the app needs these DLLs at runtime. Version and
+          # variant must match the prebuilt libs the crate links against
+          # (target/sherpa-onnx-prebuilt/sherpa-onnx-v<V>-win-x64-shared-MT-
+          # Release-lib). Declared as Windows bundle resources in
+          # tauri.windows.conf.json.
+          $v = "1.13.4"
+          $name = "sherpa-onnx-v$v-win-x64-shared-MT-Release"
           curl.exe -sSL -o sherpa.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/$name.tar.bz2"
           tar xjf sherpa.tar.bz2
           Copy-Item "$name/lib/sherpa-onnx-c-api.dll","$name/lib/onnxruntime.dll","$name/lib/onnxruntime_providers_shared.dll" -Destination "frontend/src-tauri/"
