@@ -21,7 +21,7 @@ tokio = { version = "1.32.0", features = ["full"] }
 # [patch.crates-io] sections in non-root package manifests.
 [patch.crates-io]
 cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }
-esaxx-rs = { git = "https://github.com/thewh1teagle/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }
+esaxx-rs = { git = "https://github.com/casagrandegregorio/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }
 
 # Profiles must live at the workspace root (cargo ignores them in member
 # manifests). meetily uses cargo's default release profile (opt-level=3)
