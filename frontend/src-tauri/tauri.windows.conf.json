@@ -1,0 +1,10 @@
+{
+    "bundle": {
+        "resources": [
+            "templates/*.json",
+            "sherpa-onnx-c-api.dll",
+            "onnxruntime.dll",
+            "onnxruntime_providers_shared.dll"
+        ]
+    }
+}

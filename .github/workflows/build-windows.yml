@@ -666,6 +666,20 @@ jobs:
           path: frontend/src-tauri/binaries/ffmpeg-*.exe
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
 
+      - name: Fetch sherpa-onnx shared DLLs (bundled beside the exe)
+        shell: pwsh
+        run: |
+          # sherpa-onnx is linked with the `shared` feature (see src-tauri
+          # Cargo.toml), so the app needs these DLLs at runtime. Version must
+          # match the sherpa-onnx crate version. Declared as Windows bundle
+          # resources in tauri.windows.conf.json.
+          $v = "1.13.0"
+          $name = "sherpa-onnx-v$v-win-x64-shared-MD-Release"
+          curl.exe -sSL -o sherpa.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/$name.tar.bz2"
+          tar xjf sherpa.tar.bz2
+          Copy-Item "$name/lib/sherpa-onnx-c-api.dll","$name/lib/onnxruntime.dll","$name/lib/onnxruntime_providers_shared.dll" -Destination "frontend/src-tauri/"
+          Get-ChildItem "frontend/src-tauri/*.dll"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
