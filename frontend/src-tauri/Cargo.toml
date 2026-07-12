@@ -185,7 +185,7 @@ whisper-rs = { version = "0.16.0", features = ["raw-api", "metal", "coreml", "lo
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.16.0", features = ["raw-api", "vulkan", "log_backend"] }
+whisper-rs = { version = "0.16.0", features = ["raw-api", "log_backend"] }
 futures-channel = "0.3.31"
 
 # Linux-specific dependencies
