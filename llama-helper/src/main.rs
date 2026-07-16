@@ -372,8 +372,12 @@ impl ModelState {
             // Buffer size 8 matches the upstream deprecated impl; `true` is the
             // boolean equivalent of `Special::Tokenize` (render special tokens
             // as their textual form rather than skipping them).
+            // Some tokenizers (e.g. Gemma 3) have pieces longer than 8 bytes,
+            // which makes the first call fail — retry with a generous buffer
+            // before giving up.
             let output_bytes = model
                 .token_to_piece_bytes(token, 8, true, None)
+                .or_else(|_| model.token_to_piece_bytes(token, 512, true, None))
                 .context("Failed to convert token to bytes")?;
 
             let mut token_text = String::with_capacity(32);
