@@ -139,7 +139,11 @@ export function RecordingTopBar({
           `}
         />
         <span className="text-sm font-medium">
-          {isPaused ? "Paused" : "Recording"}
+          {isStopping
+            ? (recordingState.statusMessage ?? "Stopping recording…")
+            : isPaused
+              ? "Paused"
+              : "Recording"}
         </span>
         <span className="font-mono text-sm tabular-nums text-muted-foreground">
           {formatElapsed(now - startedAt)}

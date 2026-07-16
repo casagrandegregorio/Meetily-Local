@@ -22,6 +22,12 @@ export interface RecordingStoppedPayload {
   meeting_name?: string;
 }
 
+export interface ShutdownProgressPayload {
+  stage: string;
+  message: string;
+  progress: number;
+}
+
 /**
  * Recording Service
  * Singleton service for managing recording lifecycle operations
@@ -145,6 +151,23 @@ export class RecordingService {
    */
   async onRecordingResumed(callback: () => void): Promise<UnlistenFn> {
     return listen("recording-resumed", callback);
+  }
+
+  /**
+   * Listen for recording-shutdown-progress events, emitted by the backend
+   * while it drains the transcription queue and finalizes the recording
+   * @param callback - Function to call on each progress update
+   * @returns Promise that resolves to unlisten function
+   */
+  async onShutdownProgress(
+    callback: (payload: ShutdownProgressPayload) => void,
+  ): Promise<UnlistenFn> {
+    return listen<ShutdownProgressPayload>(
+      "recording-shutdown-progress",
+      (event) => {
+        callback(event.payload);
+      },
+    );
   }
 
   /**

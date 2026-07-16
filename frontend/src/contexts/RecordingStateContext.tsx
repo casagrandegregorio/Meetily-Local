@@ -216,6 +216,26 @@ export function RecordingStateProvider({
         );
         unsubscribers.push(unlistenStopped);
 
+        // Shutdown progress: the backend emits these while it drains the
+        // transcription queue and finalizes the recording. Surfacing them
+        // keeps the stop flow from looking frozen on slow machines.
+        const unlistenShutdownProgress =
+          await recordingService.onShutdownProgress((payload) => {
+            if (payload.stage === "complete") {
+              return; // recording-stopped handles the final transition
+            }
+            setState((prev) => ({
+              ...prev,
+              status:
+                prev.status === RecordingStatus.RECORDING ||
+                prev.status === RecordingStatus.IDLE
+                  ? RecordingStatus.STOPPING
+                  : prev.status,
+              statusMessage: payload.message,
+            }));
+          });
+        unsubscribers.push(unlistenShutdownProgress);
+
         // Recording paused
         const unlistenPaused = await recordingService.onRecordingPaused(() => {
           console.log("[RecordingStateContext] Recording paused event");
