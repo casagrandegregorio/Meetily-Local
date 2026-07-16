@@ -561,14 +561,33 @@ async fn run_import<R: Runtime>(
         processable_count
     );
 
+    // Create the meeting row up front so each transcript can be persisted the
+    // moment it is produced. A multi-hour CPU import that is interrupted at
+    // 90% must not lose the segments already transcribed.
+    let app_state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| anyhow!("App state not available"))?;
+    let pool = app_state.db_manager.pool();
+
+    let meeting_id =
+        create_meeting_row(pool, &title, meeting_folder.to_string_lossy().to_string()).await?;
+
     // Process each speech segment
-    let mut all_transcripts: Vec<BatchTranscript> = Vec::new();
+    let mut segments: Vec<TranscriptSegment> = Vec::new();
     let mut total_confidence = 0.0f32;
+    let mut cancelled = false;
 
     for (i, segment) in processable_segments.iter().enumerate() {
         if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-            let _ = std::fs::remove_dir_all(&meeting_folder);
-            return Err(anyhow!("Import cancelled"));
+            // Segments transcribed so far are already in the database: keep
+            // them and finalize instead of discarding hours of work.
+            warn!(
+                "Import cancelled at segment {} of {} — keeping partial transcript",
+                i + 1,
+                processable_count
+            );
+            cancelled = true;
+            break;
         }
 
         let progress = 30 + ((i as f32 / processable_count.max(1) as f32) * 50.0) as u32;
@@ -635,13 +654,21 @@ async fn run_import<R: Runtime>(
                 None => (None, None),
             };
 
-            all_transcripts.push(BatchTranscript {
+            let batch_transcript = BatchTranscript {
                 text,
                 start_ms: segment.start_timestamp_ms,
                 end_ms: segment.end_timestamp_ms,
                 speaker,
                 voice_profile_id,
-            });
+            };
+            let transcript_segment =
+                create_transcript_segments(std::slice::from_ref(&batch_transcript))
+                    .pop()
+                    .expect("one BatchTranscript yields one TranscriptSegment");
+
+            // Persist immediately — a crash or cancel must not lose this segment.
+            insert_transcript_row(pool, &meeting_id, &transcript_segment).await?;
+            segments.push(transcript_segment);
             total_confidence += conf;
         } else {
             debug!(
@@ -653,7 +680,7 @@ async fn run_import<R: Runtime>(
         }
     }
 
-    let transcribed_count = all_transcripts.len();
+    let transcribed_count = segments.len();
     let avg_confidence = if transcribed_count > 0 {
         total_confidence / transcribed_count as f32
     } else {
@@ -665,29 +692,20 @@ async fn run_import<R: Runtime>(
         transcribed_count, processable_count, avg_confidence
     );
 
-    // Check for cancellation
-    if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-        let _ = std::fs::remove_dir_all(&meeting_folder);
-        return Err(anyhow!("Import cancelled"));
+    if cancelled {
+        let _ = app.emit(
+            "import-warning",
+            ImportWarning {
+                warning: "Import cancelled — partial transcript saved".to_string(),
+                details: Some(format!(
+                    "{} of {} segments were transcribed before cancellation and have been saved.",
+                    transcribed_count, processable_count
+                )),
+            },
+        );
     }
 
-    emit_progress(&app, "saving", 85, "Creating meeting...");
-
-    // Create transcript segments
-    let segments = create_transcript_segments(&all_transcripts);
-
-    // Save to database
-    let app_state = app
-        .try_state::<AppState>()
-        .ok_or_else(|| anyhow!("App state not available"))?;
-
-    let meeting_id = create_meeting_with_transcripts(
-        app_state.db_manager.pool(),
-        &title,
-        &segments,
-        meeting_folder.to_string_lossy().to_string(),
-    )
-    .await?;
+    emit_progress(&app, "saving", 85, "Finalizing meeting...");
 
     // Write transcripts.json and metadata.json to the meeting folder
     emit_progress(&app, "saving", 90, "Writing transcript files...");
@@ -740,26 +758,17 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, stage: &str, progress: u32, mes
     );
 }
 
-/// Create a new meeting with transcripts in the database
-async fn create_meeting_with_transcripts(
+/// Create an empty meeting row for an import. Transcripts are inserted one by
+/// one as they are produced (see `run_import`), so an interrupted import keeps
+/// everything transcribed up to that point.
+async fn create_meeting_row(
     pool: &sqlx::SqlitePool,
     title: &str,
-    segments: &[TranscriptSegment],
     folder_path: String,
 ) -> Result<String> {
     let meeting_id = format!("meeting-{}", Uuid::new_v4());
     let now = chrono::Utc::now();
 
-    // Start transaction
-    let mut conn = pool
-        .acquire()
-        .await
-        .map_err(|e| anyhow!("DB error: {}", e))?;
-    let mut tx = sqlx::Connection::begin(&mut *conn)
-        .await
-        .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
-
-    // Insert meeting
     sqlx::query(
         "INSERT INTO meetings (id, title, created_at, updated_at, folder_path)
          VALUES (?, ?, ?, ?, ?)",
@@ -769,41 +778,38 @@ async fn create_meeting_with_transcripts(
     .bind(now)
     .bind(now)
     .bind(&folder_path)
-    .execute(&mut *tx)
+    .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to create meeting: {}", e))?;
 
-    // Insert transcripts
-    for segment in segments {
-        sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, voice_profile_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&segment.id)
-        .bind(&meeting_id)
-        .bind(&segment.text)
-        .bind(&segment.timestamp)
-        .bind(segment.audio_start_time)
-        .bind(segment.audio_end_time)
-        .bind(segment.duration)
-        .bind(&segment.speaker)
-        .bind(&segment.voice_profile_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
-    }
-
-    tx.commit()
-        .await
-        .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
-
-    info!(
-        "Created meeting '{}' with {} transcripts",
-        meeting_id,
-        segments.len()
-    );
-
+    info!("Created meeting '{}' for import", meeting_id);
     Ok(meeting_id)
+}
+
+/// Insert a single transcript row for a meeting.
+async fn insert_transcript_row(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    segment: &TranscriptSegment,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, voice_profile_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&segment.id)
+    .bind(meeting_id)
+    .bind(&segment.text)
+    .bind(&segment.timestamp)
+    .bind(segment.audio_start_time)
+    .bind(segment.audio_end_time)
+    .bind(segment.duration)
+    .bind(&segment.speaker)
+    .bind(&segment.voice_profile_id)
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
+
+    Ok(())
 }
 
 /// Get or initialize the Whisper engine
