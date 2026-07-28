@@ -1,0 +1,21 @@
+# Workspace-wide build environment.
+#
+# Both ggml-based dependencies — whisper.cpp (via whisper-rs-sys, used by the
+# Tauri app) and llama.cpp (via llama-cpp-sys-2, used by the llama-helper
+# sidecar) — default to GGML_NATIVE=ON. On MSVC that runs FindSIMD.cmake, which
+# probes the CPU of whatever machine happens to be compiling and bakes in
+# /arch:AVX512 if that machine supports it. CI runners are a mixed fleet, so the
+# very same source produced a portable binary in one run and an AVX-512-only
+# binary in the next; the latter died with STATUS_ILLEGAL_INSTRUCTION
+# (0xc000001d) at the first ggml call on any consumer CPU without AVX-512.
+#
+# Pinning it here rather than in the CI workflow means every build is portable —
+# local developer builds included — and the setting travels with the repository.
+# See cmake/portable-cpu.cmake for the flags themselves.
+#
+# The two variables exist because the two build scripts expose different hooks:
+# whisper-rs-sys forwards GGML_*-prefixed environment variables to CMake, while
+# llama-cpp-sys-2 forwards only CMAKE_*-prefixed ones.
+[env]
+GGML_NATIVE = { value = "OFF", force = true }
+CMAKE_TOOLCHAIN_FILE = { value = "cmake/portable-cpu.cmake", relative = true, force = true }
