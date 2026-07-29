@@ -2,6 +2,7 @@
 //
 // Transcription module: Provider abstraction, engine management, and worker pool.
 
+pub mod batch;
 pub mod engine;
 pub mod groq_provider;
 pub mod provider;
@@ -13,6 +14,7 @@ pub use engine::{
     get_or_init_transcription_engine, get_or_init_whisper, validate_transcription_model_ready,
     TranscriptionEngine,
 };
+pub use batch::{remote_from_settings, BatchTranscriber};
 pub use groq_provider::GroqProvider;
 pub use provider::{TranscriptResult, TranscriptionError, TranscriptionProvider};
 pub use whisper_provider::WhisperProvider;

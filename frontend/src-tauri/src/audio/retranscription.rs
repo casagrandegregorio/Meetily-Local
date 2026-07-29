@@ -345,8 +345,21 @@ async fn run_retranscription<R: Runtime>(
         "Loading transcription engine...",
     );
 
-    // Initialize Whisper once (not per-segment)
-    let whisper_engine = Some(get_or_init_whisper(&app, model.as_deref()).await?);
+    // Pick the engine once (not per-segment). Follows the saved provider: a
+    // remote one when configured, local Whisper otherwise. This is the path
+    // that produces the *authoritative* transcript of a meeting, so it is the
+    // one that most deserves the fast, accurate engine.
+    let transcriber = Some(
+        match crate::audio::transcription::remote_from_settings(&app).await {
+            Some(remote) => crate::audio::transcription::BatchTranscriber::Remote(remote),
+            None => crate::audio::transcription::BatchTranscriber::Whisper(
+                get_or_init_whisper(&app, model.as_deref()).await?,
+            ),
+        },
+    );
+    if let Some(engine) = transcriber.as_ref() {
+        info!("Retranscription will run on {}", engine.engine_name());
+    }
 
     // Build a fresh diarizer for this batch (None if speaker model isn't
     // downloaded). The mixed-audio source means we can't recover mic vs
@@ -431,12 +444,12 @@ async fn run_retranscription<R: Runtime>(
             continue;
         }
 
-        // Transcribe this segment with Whisper.
-        let engine = whisper_engine.as_ref().unwrap();
-        let (text, _confidence, _) = engine
-            .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
+        // Transcribe this segment with whichever engine was selected above.
+        let engine = transcriber.as_ref().unwrap();
+        let text = engine
+            .transcribe(segment.samples.clone(), language.clone())
             .await
-            .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
+            .map_err(|e| anyhow!("Transcription failed on segment {}: {}", i, e))?;
 
         // Skip empty transcripts
         let trimmed = text.trim();

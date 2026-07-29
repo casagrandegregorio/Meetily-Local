@@ -108,6 +108,27 @@ export function TranscriptPanel({
         </div>
       </div>
 
+      {/* This panel always shows the live pass, which transcribes 30-second
+          windows in isolation as they arrive. The authoritative transcript is
+          the one produced afterwards from the whole saved recording, where the
+          engine sees complete sentences instead of chopped fragments. Say so,
+          so nobody months later has to guess which of the two they are
+          reading. */}
+      {transcripts?.length > 0 && (
+        <div className="px-4 pt-4">
+          <p
+            className="
+              rounded-md border border-border bg-muted px-3 py-2 text-xs
+              text-muted-foreground
+            "
+          >
+            <span className="font-medium">Bozza dal vivo.</span> Trascritta a
+            pezzi mentre parli. La versione definitiva si ottiene ritrascrivendo
+            l&apos;audio registrato, ed è più precisa.
+          </p>
+        </div>
+      )}
+
       {/* Permission Warning - Not needed on Linux */}
       {!isRecording && !isChecking && !isLinux && (
         <div className="flex justify-center px-4 pt-4">

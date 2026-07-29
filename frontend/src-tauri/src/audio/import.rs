@@ -505,9 +505,20 @@ async fn run_import<R: Runtime>(
 
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
-    // Initialize Whisper for the import job (only if there's anything to transcribe).
-    let whisper_engine = if total_segments > 0 {
-        Some(get_or_init_whisper(&app, model.as_deref()).await?)
+    // Pick the engine for this import job (only if there's anything to
+    // transcribe). Follows the saved provider: a remote one when configured,
+    // local Whisper otherwise. A batch job may fall back to local silently —
+    // unlike a live recording, nothing is lost but time, and the audio is
+    // already on disk.
+    let transcriber = if total_segments > 0 {
+        let engine = match crate::audio::transcription::remote_from_settings(&app).await {
+            Some(remote) => crate::audio::transcription::BatchTranscriber::Remote(remote),
+            None => crate::audio::transcription::BatchTranscriber::Whisper(
+                get_or_init_whisper(&app, model.as_deref()).await?,
+            ),
+        };
+        info!("Import will transcribe with {}", engine.engine_name());
+        Some(engine)
     } else {
         None
     };
@@ -613,12 +624,12 @@ async fn run_import<R: Runtime>(
             continue;
         }
 
-        // Transcribe with Whisper.
-        let engine = whisper_engine.as_ref().unwrap();
-        let (text, _confidence, _) = engine
-            .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
+        // Transcribe with whichever engine was selected above.
+        let engine = transcriber.as_ref().unwrap();
+        let text = engine
+            .transcribe(segment.samples.clone(), language.clone())
             .await
-            .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
+            .map_err(|e| anyhow!("Transcription failed on segment {}: {}", i, e))?;
 
         let trimmed = text.trim();
         if !trimmed.is_empty() {
