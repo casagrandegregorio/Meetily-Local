@@ -3,7 +3,6 @@
 use crate::api::TranscriptSegment;
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
 use crate::audio::vad::get_speech_chunks_with_progress;
-use crate::config::DEFAULT_WHISPER_MODEL;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
 use anyhow::{anyhow, Result};
@@ -861,9 +860,9 @@ async fn get_or_init_whisper<R: Runtime>(
     }
 }
 
-/// Get the configured Whisper model from database, defaulting to
-/// [`DEFAULT_WHISPER_MODEL`] if nothing is saved or the saved provider isn't
-/// Whisper.
+/// Get the configured Whisper model from the database, defaulting to
+/// [`crate::config::DEFAULT_WHISPER_MODEL`] if nothing is saved or the saved
+/// provider isn't Whisper.
 async fn get_configured_model<R: Runtime>(app: &AppHandle<R>) -> Result<String> {
     let app_state = app
         .try_state::<AppState>()
@@ -875,10 +874,9 @@ async fn get_configured_model<R: Runtime>(app: &AppHandle<R>) -> Result<String> 
             .await
             .map_err(|e| anyhow!("Failed to query config: {}", e))?;
 
-    match result {
-        Some((provider, model)) if provider == "localWhisper" || provider == "whisper" => Ok(model),
-        _ => Ok(DEFAULT_WHISPER_MODEL.to_string()),
-    }
+    // Shared with retranscription so the two batch paths cannot drift apart on
+    // which model they pick.
+    Ok(super::common::whisper_model_for_batch(None, result))
 }
 
 /// Write metadata.json to a meeting folder (atomic write with temp file)

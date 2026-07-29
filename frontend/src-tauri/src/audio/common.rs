@@ -23,6 +23,42 @@ pub(crate) async fn unload_engine_after_batch() {
     }
 }
 
+/// Which local Whisper model a batch job should load.
+///
+/// Called only once a batch job has already decided to run locally — either
+/// because the saved provider *is* local Whisper, or because a remote provider
+/// was configured without an API key and
+/// [`remote_from_settings`](crate::audio::transcription::remote_from_settings)
+/// declined to build one.
+///
+/// That second case is why this returns a model rather than a `Result`. A batch
+/// job always has a working fallback: the audio is already on disk, so running
+/// it locally costs time and nothing else. Refusing to transcribe at all
+/// because settings happen to name a remote provider strands the user with a
+/// recording they cannot get a transcript out of.
+///
+/// `saved` is the `(provider, model)` row from `transcript_settings`; the model
+/// it carries belongs to whichever provider is named, so it is only usable when
+/// that provider is a local Whisper one.
+pub(crate) fn whisper_model_for_batch(
+    requested: Option<&str>,
+    saved: Option<(String, String)>,
+) -> String {
+    if let Some(model) = requested.map(str::trim).filter(|m| !m.is_empty()) {
+        return model.to_string();
+    }
+
+    match saved {
+        Some((provider, model))
+            if (provider == "localWhisper" || provider == "whisper")
+                && !model.trim().is_empty() =>
+        {
+            model
+        }
+        _ => crate::config::DEFAULT_WHISPER_MODEL.to_string(),
+    }
+}
+
 /// One transcribed segment from a batch (import / retranscription) job.
 /// `speaker`/`voice_profile_id` are populated when a [`Diarizer`] is
 /// available for the batch; otherwise they're `None`.
@@ -207,4 +243,69 @@ pub(crate) fn split_segment_at_silence(
     }
 
     result
+}
+
+#[cfg(test)]
+mod batch_model_tests {
+    use super::whisper_model_for_batch;
+    use crate::config::DEFAULT_WHISPER_MODEL;
+
+    fn saved(provider: &str, model: &str) -> Option<(String, String)> {
+        Some((provider.to_string(), model.to_string()))
+    }
+
+    /// The defect this function was extracted to fix.
+    ///
+    /// Settings name Groq but no API key is saved, so the batch job fell back to
+    /// running locally. Retranscription used to refuse outright here — it read
+    /// the provider, saw "groq", and returned "Retranscription requires
+    /// Whisper", aborting a job whose audio was sitting on disk ready to go.
+    /// Import, on the same input, quietly used the default model. The two paths
+    /// are meant to behave identically.
+    #[test]
+    fn a_remote_provider_falls_back_to_the_default_local_model() {
+        assert_eq!(
+            whisper_model_for_batch(None, saved("groq", "whisper-large-v3-turbo")),
+            DEFAULT_WHISPER_MODEL
+        );
+    }
+
+    /// The Groq row's model name belongs to Groq and means nothing to
+    /// whisper.cpp — loading it would fail. It must not leak through.
+    #[test]
+    fn a_remote_providers_model_name_is_never_handed_to_whisper() {
+        let chosen = whisper_model_for_batch(None, saved("groq", "whisper-large-v3-turbo"));
+        assert_ne!(chosen, "whisper-large-v3-turbo");
+    }
+
+    #[test]
+    fn a_local_whisper_setting_is_honoured() {
+        assert_eq!(whisper_model_for_batch(None, saved("localWhisper", "small")), "small");
+        assert_eq!(whisper_model_for_batch(None, saved("whisper", "medium")), "medium");
+    }
+
+    #[test]
+    fn an_explicit_request_wins_over_the_saved_setting() {
+        assert_eq!(
+            whisper_model_for_batch(Some("tiny"), saved("localWhisper", "small")),
+            "tiny"
+        );
+    }
+
+    #[test]
+    fn a_blank_request_is_ignored_rather_than_loaded() {
+        assert_eq!(
+            whisper_model_for_batch(Some("   "), saved("localWhisper", "small")),
+            "small"
+        );
+    }
+
+    #[test]
+    fn unconfigured_settings_yield_the_default() {
+        assert_eq!(whisper_model_for_batch(None, None), DEFAULT_WHISPER_MODEL);
+        assert_eq!(
+            whisper_model_for_batch(None, saved("localWhisper", "")),
+            DEFAULT_WHISPER_MODEL
+        );
+    }
 }

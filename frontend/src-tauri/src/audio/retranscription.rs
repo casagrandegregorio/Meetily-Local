@@ -735,33 +735,25 @@ async fn get_configured_whisper_model<R: Runtime>(app: &AppHandle<R>) -> Result<
                 anyhow!("Failed to query transcript config: {}", e)
             })?;
 
-    match result {
-        Some((provider, model)) => {
-            info!(
-                "Found transcript config: provider={}, model={}",
-                provider, model
-            );
-
-            // Check if provider is Whisper-based
-            if provider == "localWhisper" || provider == "whisper" {
-                Ok(model)
-            } else {
-                error!(
-                    "Retranscription requires Whisper provider, but configured provider is: {}",
-                    provider
-                );
-                Err(anyhow!("Retranscription requires Whisper. Current provider '{}' does not support retranscription with language selection.", provider))
-            }
-        }
-        None => {
-            // Default to configured Whisper model if no config exists
-            warn!(
-                "No transcript config found, using default model '{}'",
-                DEFAULT_WHISPER_MODEL
-            );
-            Ok(DEFAULT_WHISPER_MODEL.to_string())
-        }
+    if let Some((provider, model)) = result.as_ref() {
+        info!(
+            "Found transcript config: provider={}, model={}",
+            provider, model
+        );
+    } else {
+        warn!(
+            "No transcript config found, using default model '{}'",
+            DEFAULT_WHISPER_MODEL
+        );
     }
+
+    // Reaching this function at all means the job is already running locally —
+    // a configured remote provider would have been built by
+    // `remote_from_settings` before we got here. So a non-Whisper provider in
+    // settings is not an error, it just means its model name is not ours to
+    // load. See `whisper_model_for_batch` for why a batch job always falls back
+    // instead of refusing.
+    Ok(super::common::whisper_model_for_batch(None, result))
 }
 
 /// Write or update metadata.json for retranscription (preserves existing fields, adds retranscribed_at)

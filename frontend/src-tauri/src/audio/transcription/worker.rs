@@ -9,7 +9,7 @@ use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 
 // Sequence counter for transcript updates
@@ -18,20 +18,43 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
-// Chunk accounting for the current recording session. Static rather than task-
-// local because the shutdown path needs to tell "still grinding" from "wedged"
-// without a handle on the task's internals: it waits on *progress*, not on a
-// wall-clock budget. Reset at the top of every transcription task; recording is
-// single-session (one global TRANSCRIPTION_TASK), so there is nothing to race.
-static CHUNKS_QUEUED: AtomicU64 = AtomicU64::new(0);
-static CHUNKS_COMPLETED: AtomicU64 = AtomicU64::new(0);
+/// Chunk accounting for one transcription session.
+///
+/// Owned by the session's task and shared with its workers through an `Arc`, so
+/// each session counts only its own chunks. The shutdown watchdog needs to read
+/// these to tell "still grinding" from "wedged", which is what `CURRENT_PROGRESS`
+/// below is for.
+#[derive(Default)]
+pub struct ChunkProgress {
+    queued: AtomicU64,
+    completed: AtomicU64,
+}
 
-/// `(completed, queued)` chunk counts for the running transcription session.
+/// Handle on the newest session's counters, for the shutdown watchdog.
+///
+/// Deliberately an `Arc` snapshot rather than plain statics. A session is not
+/// guaranteed to be over when the next one starts: when the watchdog gives up on
+/// a wedged engine it *detaches* the task rather than aborting it, so the old
+/// worker can still be alive and looping. With shared statics the new session's
+/// reset would move the old worker's finish line — its "have all chunks been
+/// processed" test would read foreign numbers and spin, and its progress would
+/// mask a genuine stall in the new session. Each session holding its own
+/// counters makes that impossible by construction.
+static CURRENT_PROGRESS: Mutex<Option<Arc<ChunkProgress>>> = Mutex::new(None);
+
+/// `(completed, queued)` chunk counts for the newest transcription session.
 pub fn transcription_progress() -> (u64, u64) {
-    (
-        CHUNKS_COMPLETED.load(Ordering::SeqCst),
-        CHUNKS_QUEUED.load(Ordering::SeqCst),
-    )
+    let guard = match CURRENT_PROGRESS.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    match guard.as_ref() {
+        Some(p) => (
+            p.completed.load(Ordering::SeqCst),
+            p.queued.load(Ordering::SeqCst),
+        ),
+        None => (0, 0),
+    }
 }
 
 /// Reset the speech detected flag for a new recording session
@@ -92,6 +115,18 @@ pub fn start_transcription_task<R: Runtime>(
     tokio::spawn(async move {
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
 
+        // Publish this session's counters before anything that can fail, so a
+        // shutdown right after a failed engine init reads 0/0 rather than the
+        // previous meeting's totals.
+        let progress = Arc::new(ChunkProgress::default());
+        {
+            let mut current = match CURRENT_PROGRESS.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            *current = Some(progress.clone());
+        }
+
         // Initialize transcription engine (Whisper, or a remote provider via the trait).
         let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await
         {
@@ -112,10 +147,6 @@ pub fn start_transcription_task<R: Runtime>(
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
-        // Track completion. Counters are session-global so the shutdown
-        // watchdog can read them; reset here for the new session.
-        CHUNKS_QUEUED.store(0, Ordering::SeqCst);
-        CHUNKS_COMPLETED.store(0, Ordering::SeqCst);
         let input_finished = Arc::new(AtomicBool::new(false));
 
         info!(
@@ -134,6 +165,7 @@ pub fn start_transcription_task<R: Runtime>(
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
             let input_finished_clone = input_finished.clone();
+            let progress_clone = progress.clone();
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
@@ -185,7 +217,7 @@ pub fn start_transcription_task<R: Runtime>(
                             if !engine_clone.is_model_loaded().await {
                                 warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
                                 // Still count as completed even if we can't process
-                                CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst);
+                                progress_clone.completed.fetch_add(1, Ordering::SeqCst);
                                 continue;
                             }
 
@@ -346,7 +378,7 @@ pub fn start_transcription_task<R: Runtime>(
                                         TranscriptionError::AudioTooShort { .. } => {
                                             // Skip silently, this is expected for very short chunks
                                             info!("Worker {}: {}", worker_id, e);
-                                            CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst);
+                                            progress_clone.completed.fetch_add(1, Ordering::SeqCst);
                                             continue;
                                         }
                                         TranscriptionError::ModelNotLoaded => {
@@ -354,7 +386,7 @@ pub fn start_transcription_task<R: Runtime>(
                                                 "Worker {}: Model unloaded during transcription",
                                                 worker_id
                                             );
-                                            CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst);
+                                            progress_clone.completed.fetch_add(1, Ordering::SeqCst);
                                             continue;
                                         }
                                         _ => {
@@ -371,8 +403,8 @@ pub fn start_transcription_task<R: Runtime>(
 
                             // Mark chunk as completed
                             let completed =
-                                CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst) + 1;
-                            let queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
+                                progress_clone.completed.fetch_add(1, Ordering::SeqCst) + 1;
+                            let queued = progress_clone.queued.load(Ordering::SeqCst);
 
                             // PERFORMANCE: Only log progress every 5th chunk to reduce I/O overhead
                             if completed % 5 == 0 || should_log_this_chunk {
@@ -404,8 +436,8 @@ pub fn start_transcription_task<R: Runtime>(
                             // No more chunks available
                             if input_finished_clone.load(Ordering::SeqCst) {
                                 // Double-check that all queued chunks are actually completed
-                                let final_queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
-                                let final_completed = CHUNKS_COMPLETED.load(Ordering::SeqCst);
+                                let final_queued = progress_clone.queued.load(Ordering::SeqCst);
+                                let final_completed = progress_clone.completed.load(Ordering::SeqCst);
 
                                 if final_completed >= final_queued {
                                     info!(
@@ -435,7 +467,7 @@ pub fn start_transcription_task<R: Runtime>(
         // Main dispatcher: receive chunks and distribute to workers
         let mut receiver = transcription_receiver;
         while let Some(chunk) = receiver.recv().await {
-            let queued = CHUNKS_QUEUED.fetch_add(1, Ordering::SeqCst) + 1;
+            let queued = progress.queued.fetch_add(1, Ordering::SeqCst) + 1;
             info!(
                 "📥 Dispatching chunk {} to workers (total queued: {})",
                 chunk.chunk_id, queued
@@ -451,7 +483,7 @@ pub fn start_transcription_task<R: Runtime>(
         input_finished.store(true, Ordering::SeqCst);
         drop(work_sender); // Close the channel to signal workers
 
-        let total_chunks_queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
+        let total_chunks_queued = progress.queued.load(Ordering::SeqCst);
         info!("📭 Input finished with {} total chunks queued. Waiting for all {} workers to complete...",
               total_chunks_queued, NUM_WORKERS);
 
@@ -475,8 +507,8 @@ pub fn start_transcription_task<R: Runtime>(
         const MAX_VERIFICATION_ATTEMPTS: u32 = 10;
 
         loop {
-            let final_queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
-            let final_completed = CHUNKS_COMPLETED.load(Ordering::SeqCst);
+            let final_queued = progress.queued.load(Ordering::SeqCst);
+            let final_completed = progress.completed.load(Ordering::SeqCst);
 
             if final_queued == final_completed {
                 info!(

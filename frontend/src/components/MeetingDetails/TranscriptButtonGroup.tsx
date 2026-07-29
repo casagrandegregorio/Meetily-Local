@@ -82,13 +82,16 @@ export function TranscriptButtonGroup({
                 xl:px-4
               "
               onClick={() => setShowRetranscribeDialog(true)}
-              title="Retranscribe to enhance your recorded audio"
+              title="Rebuild this transcript from the whole recording. The live transcript is a draft cut into 30-second windows; this one sees complete sentences and is more accurate."
             >
               <RefreshCw className="xl:mr-2" size={18} />
+              {/* "Enhance" said nothing about what this does. It is the step
+                  that turns the live draft into the real transcript, and it is
+                  the reason the audio is kept — name it that way. */}
               <span className="
                 hidden
                 lg:inline
-              ">Enhance</span>
+              ">Rebuild transcript</span>
             </Button>
           )}
       </ButtonGroup>

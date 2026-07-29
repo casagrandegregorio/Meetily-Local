@@ -27,6 +27,41 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// request is worth making at all.
 const MIN_SAMPLES: usize = TARGET_SAMPLE_RATE as usize / 10; // 100ms
 
+/// Longest we wait for one segment to come back.
+///
+/// `reqwest` has no default timeout, and there is exactly one transcription
+/// worker, so a connection that hangs rather than fails blocks *every*
+/// remaining chunk for as long as the socket stays open. During a live
+/// recording that shows up as a transcript that simply stops; at shutdown the
+/// stall watchdog eventually gives up, but only after 20 minutes of an
+/// apparently frozen app.
+///
+/// The work itself is fast — Groq runs Whisper at roughly 200x real time, so
+/// even a 25-second segment (the largest the batch paths emit) is sub-second of
+/// compute plus about 800 kB of upload. Two minutes is far beyond any healthy
+/// request and still well inside the watchdog's window, so a wedged connection
+/// surfaces as an error we can report instead of a freeze.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Separate, much tighter budget for establishing the connection: a reachable
+/// Groq answers in well under a second, and failing fast here is what lets a
+/// dropped network surface immediately rather than at the full request budget.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How many times one segment is attempted before the job gives up.
+///
+/// Four attempts with the linear backoff below spans roughly a minute, which
+/// covers a per-minute rate-limit window — the failure this exists for.
+const MAX_ATTEMPTS: u32 = 4;
+
+/// Base wait between attempts, multiplied by the attempt number. Used only when
+/// the server does not send a `Retry-After` header of its own.
+const BASE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Ceiling on any single wait, including a server-supplied `Retry-After`. Keeps
+/// one unlucky segment from parking a live recording's only worker for minutes.
+const MAX_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct GroqProvider {
     api_key: String,
     model: String,
@@ -35,10 +70,25 @@ pub struct GroqProvider {
 
 impl GroqProvider {
     pub fn new(api_key: String, model: String) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()
+            .unwrap_or_else(|e| {
+                // Only fails if the TLS backend won't initialise. An untimed
+                // client still transcribes; say so rather than killing
+                // recording over it.
+                warn!(
+                    "Could not build a timed HTTP client ({}); falling back to an untimed one",
+                    e
+                );
+                reqwest::Client::new()
+            });
+
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client,
         }
     }
 }
@@ -98,53 +148,118 @@ impl TranscriptionProvider for GroqProvider {
 
         let wav = wav_from_f32_mono(&audio, TARGET_SAMPLE_RATE);
 
-        let file_part = reqwest::multipart::Part::bytes(wav)
-            .file_name("chunk.wav")
-            .mime_str("audio/wav")
-            .map_err(|e| TranscriptionError::EngineFailed(format!("Invalid mime type: {}", e)))?;
+        // Retry on the failures that are known to pass. Rebuilding a one-hour
+        // meeting is ~150 sequential requests, which on the free tier will meet
+        // the per-minute cap; without this, one 429 two thirds of the way in
+        // aborts the whole job — after the old transcript has already been
+        // deleted. Transport errors and 5xx get the same treatment for the same
+        // reason. A 4xx that is not 429 (bad key, bad model, audio rejected)
+        // will never pass, so it fails immediately.
+        let mut attempt = 0u32;
+        let payload: serde_json::Value = loop {
+            attempt += 1;
 
-        let mut form = reqwest::multipart::Form::new()
-            .part("file", file_part)
-            .text("model", self.model.clone())
-            .text("response_format", "json")
-            // Deterministic decoding: the same audio should not transcribe
-            // differently between runs.
-            .text("temperature", "0");
+            // The form owns the file bytes and is consumed by send(), so it has
+            // to be rebuilt per attempt.
+            let file_part = reqwest::multipart::Part::bytes(wav.clone())
+                .file_name("chunk.wav")
+                .mime_str("audio/wav")
+                .map_err(|e| {
+                    TranscriptionError::EngineFailed(format!("Invalid mime type: {}", e))
+                })?;
 
-        // "auto" means let Whisper detect the language, which is what omitting
-        // the field does. "auto-translate" would need Groq's separate
-        // translations endpoint; until that is wired, treat it as auto and
-        // transcribe in the spoken language rather than silently doing nothing.
-        match language.as_deref() {
-            Some("auto") | Some("auto-translate") | None => {}
-            Some(code) => form = form.text("language", code.to_string()),
-        }
+            let mut form = reqwest::multipart::Form::new()
+                .part("file", file_part)
+                .text("model", self.model.clone())
+                .text("response_format", "json")
+                // Deterministic decoding: the same audio should not transcribe
+                // differently between runs.
+                .text("temperature", "0");
 
-        let response = self
-            .client
-            .post(GROQ_TRANSCRIPTION_URL)
-            .bearer_auth(&self.api_key)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| TranscriptionError::EngineFailed(format!("Request to Groq failed: {}", e)))?;
+            // "auto" means let Whisper detect the language, which is what
+            // omitting the field does. "auto-translate" would need Groq's
+            // separate translations endpoint; until that is wired, treat it as
+            // auto and transcribe in the spoken language rather than silently
+            // doing nothing.
+            match language.as_deref() {
+                Some("auto") | Some("auto-translate") | None => {}
+                Some(code) => form = form.text("language", code.to_string()),
+            }
 
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "<no response body>".to_string());
-            warn!("Groq transcription rejected the chunk: {} {}", status, body);
-            return Err(TranscriptionError::EngineFailed(format!(
-                "Groq returned {}: {}",
-                status, body
-            )));
-        }
+            let attempt_result = self
+                .client
+                .post(GROQ_TRANSCRIPTION_URL)
+                .bearer_auth(&self.api_key)
+                .multipart(form)
+                .send()
+                .await;
 
-        let payload: serde_json::Value = response.json().await.map_err(|e| {
-            TranscriptionError::EngineFailed(format!("Could not read Groq response: {}", e))
-        })?;
+            let retry_after = match attempt_result {
+                Err(e) => {
+                    if e.is_timeout() || e.is_connect() || e.is_request() {
+                        Some((BASE_RETRY_DELAY * attempt, format!("{}", e)))
+                    } else {
+                        return Err(TranscriptionError::EngineFailed(format!(
+                            "Request to Groq failed: {}",
+                            e
+                        )));
+                    }
+                }
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        break response.json().await.map_err(|e| {
+                            TranscriptionError::EngineFailed(format!(
+                                "Could not read Groq response: {}",
+                                e
+                            ))
+                        })?;
+                    }
+
+                    // Groq states how long to wait; honour it when present,
+                    // since guessing shorter just burns another request.
+                    let server_delay = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .map(std::time::Duration::from_secs);
+
+                    let body = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "<no response body>".to_string());
+
+                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                        Some((
+                            server_delay.unwrap_or(BASE_RETRY_DELAY * attempt),
+                            format!("{} {}", status, body),
+                        ))
+                    } else {
+                        warn!("Groq rejected the chunk: {} {}", status, body);
+                        return Err(TranscriptionError::EngineFailed(format!(
+                            "Groq returned {}: {}",
+                            status, body
+                        )));
+                    }
+                }
+            };
+
+            let (delay, reason) = retry_after.expect("non-retryable paths return above");
+            if attempt >= MAX_ATTEMPTS {
+                return Err(TranscriptionError::EngineFailed(format!(
+                    "Groq still failing after {} attempts: {}",
+                    MAX_ATTEMPTS, reason
+                )));
+            }
+
+            let delay = delay.min(MAX_RETRY_DELAY);
+            warn!(
+                "Groq attempt {}/{} failed ({}); retrying in {:?}",
+                attempt, MAX_ATTEMPTS, reason, delay
+            );
+            tokio::time::sleep(delay).await;
+        };
 
         let text = payload
             .get("text")
@@ -225,6 +340,45 @@ mod tests {
 
         assert!(first > 32_000, "positive overload must stay positive");
         assert!(second < -32_000, "negative overload must stay negative");
+    }
+
+    /// A hung request must fail inside the shutdown watchdog's patience, not
+    /// outlast it. The watchdog (`recording_commands.rs`, `STALL_LIMIT`) gives
+    /// the queue 20 minutes without a completed chunk before declaring the
+    /// engine wedged; if a single request could run longer than that, a stuck
+    /// socket would be reported to the user as a wedged engine and the whole
+    /// remaining queue discarded, rather than as one failed segment.
+    #[test]
+    fn a_request_cannot_outlast_the_shutdown_stall_watchdog() {
+        const STALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(1200);
+        assert!(
+            REQUEST_TIMEOUT < STALL_LIMIT,
+            "request timeout {:?} must stay under the {:?} stall limit",
+            REQUEST_TIMEOUT,
+            STALL_LIMIT
+        );
+        assert!(CONNECT_TIMEOUT < REQUEST_TIMEOUT);
+    }
+
+    /// ...but it must also be generous enough for the largest segment the batch
+    /// paths actually produce, or healthy work gets cut off. Import and
+    /// retranscription split anything longer than 25 s, which is ~800 kB of
+    /// 16-bit mono WAV.
+    #[test]
+    fn the_timeout_leaves_room_for_the_largest_segment_we_send() {
+        let largest_segment_samples = 25 * TARGET_SAMPLE_RATE as usize;
+        let upload_bytes = wav_from_f32_mono(&vec![0.0; largest_segment_samples], TARGET_SAMPLE_RATE).len();
+
+        assert!(
+            upload_bytes < 1_000_000,
+            "largest upload is {} bytes; the timeout was sized for well under 1 MB",
+            upload_bytes
+        );
+        assert!(
+            REQUEST_TIMEOUT >= std::time::Duration::from_secs(60),
+            "too tight for a slow network carrying {} bytes",
+            upload_bytes
+        );
     }
 
     #[test]
