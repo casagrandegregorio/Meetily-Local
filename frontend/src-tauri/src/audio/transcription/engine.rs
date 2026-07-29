@@ -38,10 +38,46 @@ impl TranscriptionEngine {
     }
 }
 
-/// Validate that the local Whisper model is ready before recording starts.
+/// Read the saved transcription provider id (e.g. "localWhisper", "groq").
+/// Falls back to local Whisper when nothing is configured or the read fails —
+/// recording must never be blocked by a settings lookup.
+async fn configured_provider<R: Runtime>(app: &AppHandle<R>) -> (String, String) {
+    match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        Ok(Some(config)) => (config.provider, config.model),
+        Ok(None) => ("localWhisper".to_string(), String::new()),
+        Err(e) => {
+            warn!("⚠️ Failed to read transcript config: {}", e);
+            ("localWhisper".to_string(), String::new())
+        }
+    }
+}
+
+/// Validate that the transcription engine is ready before recording starts.
 pub async fn validate_transcription_model_ready<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<(), String> {
+    // A remote provider has no local model to download or load: the readiness
+    // condition is a saved API key, checked here so the user is told at the
+    // Record button rather than by a wall of failed chunks afterwards.
+    let (provider, _) = configured_provider(app).await;
+    if provider == "groq" {
+        let key = crate::api::api::api_get_transcript_api_key(
+            app.clone(),
+            app.clone().state(),
+            "groq".to_string(),
+            None,
+        )
+        .await
+        .unwrap_or_default();
+
+        return if key.trim().is_empty() {
+            Err("Groq is selected for transcription but no API key is saved. Paste your key in Settings → Transcription.".to_string())
+        } else {
+            info!("✅ Groq transcription configured and ready");
+            Ok(())
+        };
+    }
+
     info!("🔍 Validating Whisper model...");
 
     if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
@@ -67,12 +103,47 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
     }
 }
 
-/// Get or initialize the Whisper transcription engine for live recording.
-/// Remote providers (e.g., OpenAI) are not used during the live audio path —
-/// the worker pool is currently Whisper-only.
+/// Get or initialize the transcription engine for live recording, honouring the
+/// provider saved in settings. Remote providers go through the
+/// `TranscriptionProvider` trait; local Whisper keeps its direct path.
 pub async fn get_or_init_transcription_engine<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<TranscriptionEngine, String> {
+    let (provider, model) = configured_provider(app).await;
+
+    if provider == "groq" {
+        let key = crate::api::api::api_get_transcript_api_key(
+            app.clone(),
+            app.clone().state(),
+            "groq".to_string(),
+            None,
+        )
+        .await
+        .unwrap_or_default();
+
+        let model = if model.trim().is_empty() {
+            None
+        } else {
+            Some(model)
+        };
+
+        match super::groq_provider::from_settings(Some(key), model) {
+            Some(groq) => {
+                info!("🎤 Initializing Groq transcription engine");
+                return Ok(TranscriptionEngine::Provider(Arc::new(groq)));
+            }
+            None => {
+                // Falling back to the local engine here would silently record an
+                // entire meeting at 1/10th speed while the user believes they
+                // are on Groq. Fail loudly instead.
+                return Err(
+                    "Groq is selected for transcription but no API key is saved. Paste your key in Settings → Transcription."
+                        .to_string(),
+                );
+            }
+        }
+    }
+
     info!("🎤 Initializing Whisper transcription engine");
     let whisper_engine = get_or_init_whisper(app).await?;
     Ok(TranscriptionEngine::Whisper(whisper_engine))

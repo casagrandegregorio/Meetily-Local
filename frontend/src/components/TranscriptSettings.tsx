@@ -78,7 +78,9 @@ export function TranscriptSettings({
     localWhisper: [], // Model selection handled by ModelManager component
     deepgram: ["nova-2-phonecall"],
     elevenLabs: ["eleven_multilingual_v2"],
-    groq: ["llama-3.3-70b-versatile"],
+    // Speech-to-text models, not chat models: these are the same Whisper
+    // weights the local engine runs, hosted on Groq's accelerators.
+    groq: ["whisper-large-v3-turbo", "whisper-large-v3"],
     openai: ["gpt-4o"],
   };
   const requiresApiKey =
@@ -145,11 +147,13 @@ export function TranscriptSettings({
               <SelectItem value="localWhisper">
                 🏠 Local Whisper (High Accuracy)
               </SelectItem>
-              {/* Cloud providers can be re-enabled here once their flows are
-                  wired:
+              <SelectItem value="groq">
+                ☁️ Groq (Fast — audio leaves this computer)
+              </SelectItem>
+              {/* The remaining cloud providers stay disabled until their flows
+                  are wired end to end:
                   <SelectItem value="deepgram">☁️ Deepgram</SelectItem>
                   <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
-                  <SelectItem value="groq">☁️ Groq</SelectItem>
                   <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
             </SelectContent>
           </Select>
