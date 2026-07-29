@@ -16,7 +16,7 @@ pub use engine::{
 };
 pub use batch::{remote_from_settings, BatchTranscriber};
 pub use groq_provider::GroqProvider;
-pub use provider::{TranscriptResult, TranscriptionError, TranscriptionProvider};
+pub use provider::{TranscriptResult, TranscriptSpan, TranscriptionError, TranscriptionProvider};
 pub use whisper_provider::WhisperProvider;
 pub use worker::{
     reset_speech_detected_flag, start_transcription_task, transcription_progress, TranscriptUpdate,

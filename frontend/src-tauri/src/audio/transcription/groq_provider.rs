@@ -14,7 +14,9 @@
 // machine. That is a deliberate, user-made choice, surfaced by picking this
 // provider in settings.
 
-use super::provider::{TranscriptResult, TranscriptionError, TranscriptionProvider};
+use super::provider::{
+    TranscriptResult, TranscriptSpan, TranscriptionError, TranscriptionProvider,
+};
 use async_trait::async_trait;
 use log::{info, warn};
 
@@ -171,7 +173,13 @@ impl TranscriptionProvider for GroqProvider {
             let mut form = reqwest::multipart::Form::new()
                 .part("file", file_part)
                 .text("model", self.model.clone())
-                .text("response_format", "json")
+                // verbose_json rather than json: it carries the model's own
+                // sentence boundaries and their times. Without them one request
+                // collapses into one line of transcript however long the audio
+                // was — a ten-second block of speech shown as a single
+                // unreadable paragraph.
+                .text("response_format", "verbose_json")
+                .text("timestamp_granularities[]", "segment")
                 // Deterministic decoding: the same audio should not transcribe
                 // differently between runs.
                 .text("temperature", "0");
@@ -268,8 +276,32 @@ impl TranscriptionProvider for GroqProvider {
             .trim()
             .to_string();
 
+        // Empty-text spans are dropped: Whisper emits them for music stings and
+        // pure silence, and they would otherwise become blank transcript lines.
+        let spans: Vec<TranscriptSpan> = payload
+            .get("segments")
+            .and_then(|s| s.as_array())
+            .map(|segments| {
+                segments
+                    .iter()
+                    .filter_map(|s| {
+                        let text = s.get("text")?.as_str()?.trim().to_string();
+                        if text.is_empty() {
+                            return None;
+                        }
+                        Some(TranscriptSpan {
+                            text,
+                            start_s: s.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            end_s: s.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(TranscriptResult {
             text,
+            spans,
             // Groq's verbose response carries avg_logprob and no_speech_prob,
             // neither of which is a transcription confidence on a 0..1 scale.
             // Report nothing rather than manufacture a number — the same

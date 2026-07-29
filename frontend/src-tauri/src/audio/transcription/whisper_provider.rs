@@ -31,6 +31,10 @@ impl TranscriptionProvider for WhisperProvider {
         {
             Ok((text, confidence, is_partial)) => Ok(TranscriptResult {
                 text: text.trim().to_string(),
+                // The local engine's per-segment timings are not surfaced
+                // through this binding, so it reports no breakdown and callers
+                // fall back to one span for the whole input.
+                spans: Vec::new(),
                 confidence,
                 is_partial,
             }),

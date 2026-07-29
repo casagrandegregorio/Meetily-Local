@@ -9,7 +9,7 @@
 // live draft) was also the slowest one to produce. This lets them follow the
 // same provider setting as live recording.
 
-use super::provider::{TranscriptionError, TranscriptionProvider};
+use super::provider::{TranscriptSpan, TranscriptionError, TranscriptionProvider};
 use anyhow::{anyhow, Result};
 use log::info;
 use std::sync::Arc;
@@ -24,24 +24,54 @@ pub enum BatchTranscriber {
 impl BatchTranscriber {
     /// Transcribe one segment. Returns the text only — batch callers keep their
     /// own timing and speaker data and have no use for a confidence score.
+    /// Transcribe one chunk, returning sentence-sized spans timed from the
+    /// start of that chunk.
+    ///
+    /// A provider that reports its own sentence boundaries gives several spans;
+    /// one that does not gives a single span covering the whole chunk, which is
+    /// what the callers used to get for everything. Callers add the chunk's own
+    /// offset to place the spans in the recording.
     pub async fn transcribe(
         &self,
         samples: Vec<f32>,
         language: Option<String>,
-    ) -> Result<String> {
+    ) -> Result<Vec<TranscriptSpan>> {
+        // Every batch caller resamples to 16 kHz before reaching here, so this
+        // is the chunk's true length in seconds.
+        let chunk_seconds = samples.len() as f64 / 16_000.0;
+
+        let whole = |text: String| {
+            let text = text.trim().to_string();
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![TranscriptSpan {
+                    text,
+                    start_s: 0.0,
+                    end_s: chunk_seconds,
+                }]
+            }
+        };
+
         match self {
             Self::Whisper(engine) => {
                 let (text, _confidence, _partial) = engine
                     .transcribe_audio_with_confidence(samples, language)
                     .await?;
-                Ok(text)
+                Ok(whole(text))
             }
             Self::Remote(provider) => match provider.transcribe(samples, language).await {
-                Ok(result) => Ok(result.text),
+                Ok(result) => {
+                    if result.spans.is_empty() {
+                        Ok(whole(result.text))
+                    } else {
+                        Ok(result.spans)
+                    }
+                }
                 // A segment below the provider's floor is not a failure of the
                 // job: skip it the same way an empty transcription is skipped,
                 // instead of aborting an hour-long import over one short blip.
-                Err(TranscriptionError::AudioTooShort { .. }) => Ok(String::new()),
+                Err(TranscriptionError::AudioTooShort { .. }) => Ok(Vec::new()),
                 Err(e) => Err(anyhow!("{}", e)),
             },
         }

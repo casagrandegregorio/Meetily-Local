@@ -625,29 +625,23 @@ async fn run_import<R: Runtime>(
 
         // Transcribe with whichever engine was selected above.
         let engine = transcriber.as_ref().unwrap();
-        let text = engine
+        let spans = engine
             .transcribe(segment.samples.clone(), language.clone())
             .await
             .map_err(|e| anyhow!("Transcription failed on segment {}: {}", i, e))?;
 
-        let trimmed = text.trim();
-        if !trimmed.is_empty() {
+        if !spans.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, text='{}'",
+                "Segment {}/{}: {:.1}s -> {} line(s)",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
-                if trimmed.len() > 80 {
-                    let mut end = 80;
-                    while !trimmed.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &trimmed[..end]
-                } else {
-                    trimmed
-                }
+                spans.len()
             );
-            // Run the diarizer (if available) on the segment audio.
+            // Run the diarizer once for the whole VAD segment, as before. The
+            // segment is the stretch the VAD judged to be one continuous piece
+            // of speech; the spans inside it are the model's sentence breaks,
+            // not speaker changes, so they all inherit its speaker.
             let (speaker, voice_profile_id) = match diarizer.as_ref() {
                 Some(d) => match d.process(i as u64, &segment.samples) {
                     Ok(result) => (Some(result.label), result.voice_profile_id),
@@ -662,21 +656,31 @@ async fn run_import<R: Runtime>(
                 None => (None, None),
             };
 
-            let batch_transcript = BatchTranscript {
-                text,
-                start_ms: segment.start_timestamp_ms,
-                end_ms: segment.end_timestamp_ms,
-                speaker,
-                voice_profile_id,
-            };
-            let transcript_segment =
-                create_transcript_segments(std::slice::from_ref(&batch_transcript))
-                    .pop()
-                    .expect("one BatchTranscript yields one TranscriptSegment");
+            for span in &spans {
+                // Place each span on the recording's timeline, clamped to the
+                // segment it came from: the model's times are its own estimate
+                // and can run past the audio it was handed.
+                let start_ms = (segment.start_timestamp_ms + span.start_s * 1000.0)
+                    .clamp(segment.start_timestamp_ms, segment.end_timestamp_ms);
+                let end_ms = (segment.start_timestamp_ms + span.end_s * 1000.0)
+                    .clamp(start_ms, segment.end_timestamp_ms);
 
-            // Persist immediately — a crash or cancel must not lose this segment.
-            insert_transcript_row(pool, &meeting_id, &transcript_segment).await?;
-            segments.push(transcript_segment);
+                let batch_transcript = BatchTranscript {
+                    text: span.text.clone(),
+                    start_ms,
+                    end_ms,
+                    speaker: speaker.clone(),
+                    voice_profile_id: voice_profile_id.clone(),
+                };
+                let transcript_segment =
+                    create_transcript_segments(std::slice::from_ref(&batch_transcript))
+                        .pop()
+                        .expect("one BatchTranscript yields one TranscriptSegment");
+
+                // Persist immediately — a crash or cancel must not lose this.
+                insert_transcript_row(pool, &meeting_id, &transcript_segment).await?;
+                segments.push(transcript_segment);
+            }
         } else {
             debug!(
                 "Segment {}/{}: {:.1}s — empty transcription",

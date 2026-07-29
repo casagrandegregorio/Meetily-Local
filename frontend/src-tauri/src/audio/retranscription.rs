@@ -446,33 +446,24 @@ async fn run_retranscription<R: Runtime>(
 
         // Transcribe this segment with whichever engine was selected above.
         let engine = transcriber.as_ref().unwrap();
-        let text = engine
+        let spans = engine
             .transcribe(segment.samples.clone(), language.clone())
             .await
             .map_err(|e| anyhow!("Transcription failed on segment {}: {}", i, e))?;
 
-        // Skip empty transcripts
-        let trimmed = text.trim();
-        if !trimmed.is_empty() {
+        if !spans.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, text='{}'",
+                "Segment {}/{}: {:.1}s -> {} line(s)",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
-                if trimmed.len() > 80 {
-                    let mut end = 80;
-                    while !trimmed.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &trimmed[..end]
-                } else {
-                    trimmed
-                }
+                spans.len()
             );
-            // Run the diarizer (if available) on the segment audio. The
-            // sequence_id used here is just the index — it's only meaningful
-            // within this batch's history (used for promote-to-profile and
-            // 2-pass refinement).
+            // Run the diarizer once for the whole VAD segment. The spans inside
+            // it are the model's sentence breaks, not speaker changes, so they
+            // all inherit its speaker. The sequence_id used here is just the
+            // index — it's only meaningful within this batch's history (used
+            // for promote-to-profile and 2-pass refinement).
             let (speaker, voice_profile_id) = match diarizer.as_ref() {
                 Some(d) => match d.process(i as u64, &segment.samples) {
                     Ok(result) => (Some(result.label), result.voice_profile_id),
@@ -487,13 +478,22 @@ async fn run_retranscription<R: Runtime>(
                 None => (None, None),
             };
 
-            all_transcripts.push(BatchTranscript {
-                text,
-                start_ms: segment.start_timestamp_ms,
-                end_ms: segment.end_timestamp_ms,
-                speaker,
-                voice_profile_id,
-            });
+            for span in &spans {
+                // Clamped to the segment: the model's times are its own
+                // estimate and can run past the audio it was handed.
+                let start_ms = (segment.start_timestamp_ms + span.start_s * 1000.0)
+                    .clamp(segment.start_timestamp_ms, segment.end_timestamp_ms);
+                let end_ms = (segment.start_timestamp_ms + span.end_s * 1000.0)
+                    .clamp(start_ms, segment.end_timestamp_ms);
+
+                all_transcripts.push(BatchTranscript {
+                    text: span.text.clone(),
+                    start_ms,
+                    end_ms,
+                    speaker: speaker.clone(),
+                    voice_profile_id: voice_profile_id.clone(),
+                });
+            }
         } else {
             debug!(
                 "Segment {}/{}: {:.1}s — empty transcription",

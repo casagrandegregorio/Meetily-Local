@@ -37,10 +37,28 @@ impl std::fmt::Display for TranscriptionError {
 
 impl std::error::Error for TranscriptionError {}
 
+/// One sentence-sized piece of a transcription, timed relative to the start of
+/// the audio that was submitted (not to the recording).
+///
+/// Exists because the alternative — cutting the audio finer before sending it —
+/// makes transcription *worse*: the model guesses better with more context, and
+/// a silence-threshold cut lands mid-thought. Letting the model return its own
+/// sentence boundaries gives short, readable lines without shortening the audio
+/// it reasons over.
+#[derive(Debug, Clone)]
+pub struct TranscriptSpan {
+    pub text: String,
+    pub start_s: f64,
+    pub end_s: f64,
+}
+
 /// Unified transcription result across all providers
 #[derive(Debug, Clone)]
 pub struct TranscriptResult {
     pub text: String,
+    /// Sentence-level breakdown, when the provider reports one. Empty otherwise
+    /// — callers then treat `text` as a single span covering the whole input.
+    pub spans: Vec<TranscriptSpan>,
     pub confidence: Option<f32>, // None if provider doesn't support confidence scores
     pub is_partial: bool,
 }
