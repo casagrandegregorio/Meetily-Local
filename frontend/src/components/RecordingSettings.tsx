@@ -155,52 +155,42 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   return (
     <div className="space-y-4">
       <SettingsCard>
+        {/* Always on, and shown as such rather than removed: the live
+            transcript is only a draft, and the accurate one is rebuilt from
+            the saved audio afterwards. Discarding the audio would quietly
+            remove any chance of ever getting a good transcript of that
+            meeting. */}
         <SettingsRow
           label="Save audio recordings"
-          description="Automatically save audio files when recording stops"
+          description="Always on. The audio is what the final, accurate transcript is rebuilt from — without it only the live draft survives."
         >
-          <Switch
-            checked={preferences.auto_save}
-            onCheckedChange={handleAutoSaveToggle}
-            disabled={saving}
-          />
+          <Switch checked onCheckedChange={handleAutoSaveToggle} disabled />
         </SettingsRow>
       </SettingsCard>
 
-      {preferences.auto_save && (
-        <>
-          <SettingsCard
-            title="Save location"
-            description="Where the audio file for each meeting is written."
-          >
-            <div className="space-y-3">
-              <p className="text-sm break-all text-muted-foreground">
-                {preferences.save_folder || "Default folder"}
-              </p>
-              <Button variant="outline" size="sm" onClick={handleOpenFolder}>
-                <FolderOpen className="size-4" />
-                Open folder
-              </Button>
-            </div>
-          </SettingsCard>
-
-          <SettingsCard
-            title="File format"
-            description={`Recordings are saved as recording_YYYYMMDD_HHMMSS.${preferences.file_format}.`}
-          >
-            <p className="text-sm font-medium text-foreground">
-              {preferences.file_format.toUpperCase()}
-            </p>
-          </SettingsCard>
-        </>
-      )}
-
-      {!preferences.auto_save && (
-        <div className="rounded-lg border border-warning/30 bg-warning-muted p-4 text-sm text-warning">
-          Audio recording is disabled. Enable &quot;Save audio recordings&quot;
-          to automatically save meeting audio.
+      <SettingsCard
+        title="Save location"
+        description="Where the audio file for each meeting is written."
+      >
+        <div className="space-y-3">
+          <p className="text-sm break-all text-muted-foreground">
+            {preferences.save_folder || "Default folder"}
+          </p>
+          <Button variant="outline" size="sm" onClick={handleOpenFolder}>
+            <FolderOpen className="size-4" />
+            Open folder
+          </Button>
         </div>
-      )}
+      </SettingsCard>
+
+      <SettingsCard
+        title="File format"
+        description={`Recordings are saved as recording_YYYYMMDD_HHMMSS.${preferences.file_format}.`}
+      >
+        <p className="text-sm font-medium text-foreground">
+          {preferences.file_format.toUpperCase()}
+        </p>
+      </SettingsCard>
 
       <SettingsCard>
         <SettingsRow

@@ -37,6 +37,18 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
+
+/// Meeting audio is always written to disk, regardless of the old `auto_save`
+/// preference.
+///
+/// The live transcript is a draft: it sees 30-second windows in isolation and
+/// cuts sentences at window boundaries. The transcript that counts is the one
+/// rebuilt afterwards from the whole recording — and that is only possible if
+/// the audio still exists. Making the recording discardable made the good
+/// transcript unobtainable, which is not a trade-off anyone would knowingly
+/// choose. The preference remains in the settings file so old configs still
+/// parse; it simply no longer decides this.
+const ALWAYS_SAVE_AUDIO: bool = true;
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
@@ -110,26 +122,26 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Load recording preferences to get auto_save AND device preferences
-    let (auto_save, preferred_mic_name, preferred_system_name) =
+    // Load device preferences. Audio saving is no longer optional — see
+    // ALWAYS_SAVE_AUDIO below.
+    let (preferred_mic_name, preferred_system_name) =
         match super::recording_preferences::load_recording_preferences(&app).await {
             Ok(prefs) => {
-                info!("📋 Loaded recording preferences: auto_save={}, preferred_mic={:?}, preferred_system={:?}",
-                      prefs.auto_save, prefs.preferred_mic_device, prefs.preferred_system_device);
-                (
-                    prefs.auto_save,
-                    prefs.preferred_mic_device,
-                    prefs.preferred_system_device,
-                )
+                info!(
+                    "📋 Loaded recording preferences: preferred_mic={:?}, preferred_system={:?}",
+                    prefs.preferred_mic_device, prefs.preferred_system_device
+                );
+                (prefs.preferred_mic_device, prefs.preferred_system_device)
             }
             Err(e) => {
                 warn!(
                     "Failed to load recording preferences, using defaults: {}",
                     e
                 );
-                (true, None, None)
+                (None, None)
             }
         };
+    let auto_save = ALWAYS_SAVE_AUDIO;
 
     // ============================================================================
     // MICROPHONE DEVICE RESOLUTION: Preference → Default → Error
@@ -402,23 +414,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Load recording preferences to check auto_save setting
-    let auto_save = match super::recording_preferences::load_recording_preferences(&app).await {
-        Ok(prefs) => {
-            info!(
-                "📋 Loaded recording preferences: auto_save={}",
-                prefs.auto_save
-            );
-            prefs.auto_save
-        }
-        Err(e) => {
-            warn!(
-                "Failed to load recording preferences, defaulting to auto_save=true: {}",
-                e
-            );
-            true // Default to saving if preferences can't be loaded
-        }
-    };
+    let auto_save = ALWAYS_SAVE_AUDIO;
 
     // Always ensure a meeting name is set so incremental saver initializes
     let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {

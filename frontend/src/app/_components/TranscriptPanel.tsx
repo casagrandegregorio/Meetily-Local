@@ -1,15 +1,17 @@
 import { VirtualizedTranscriptView } from "@/components/VirtualizedTranscriptView";
 import { PermissionWarning } from "@/components/PermissionWarning";
+import { RetranscribeDialog } from "@/components/MeetingDetails/RetranscribeDialog";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
-import { Copy, GlobeIcon } from "lucide-react";
+import { Copy, GlobeIcon, RefreshCw } from "lucide-react";
 import { useTranscripts } from "@/contexts/TranscriptContext";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { usePermissionCheck } from "@/hooks/usePermissionCheck";
 import { ModalType } from "@/hooks/useModalState";
 import { useIsLinux } from "@/hooks/usePlatform";
-import { useMemo } from "react";
+import { indexedDBService } from "@/services/indexedDBService";
+import { useEffect, useMemo, useState } from "react";
 
 /**
  * TranscriptPanel Component
@@ -33,11 +35,58 @@ export function TranscriptPanel({
   // Contexts
   const { transcripts, transcriptContainerRef, copyTranscript, currentMeetingId } =
     useTranscripts();
-  const { transcriptModelConfig } = useConfig();
+  const { transcriptModelConfig, betaFeatures } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } =
     usePermissionCheck();
   const isLinux = useIsLinux();
+
+  // Folder of the meeting that just finished, needed to rebuild its transcript
+  // from the saved audio. Cleared while recording so the offer to retranscribe
+  // cannot appear mid-meeting, when the audio file is still being written.
+  const [finishedMeetingFolder, setFinishedMeetingFolder] = useState<
+    string | null
+  >(null);
+
+  // Set once the rebuilt transcript has been written. This panel renders the
+  // live event stream, not the database, so it cannot show the new version in
+  // place — say where it is instead of leaving the stale draft looking current.
+  const [rebuiltTranscript, setRebuiltTranscript] = useState(false);
+
+  useEffect(() => {
+    if (isRecording || !currentMeetingId) {
+      setFinishedMeetingFolder(null);
+      setRebuiltTranscript(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const metadata =
+          await indexedDBService.getMeetingMetadata(currentMeetingId);
+        if (!cancelled) {
+          setFinishedMeetingFolder(metadata?.folderPath ?? null);
+        }
+      } catch {
+        if (!cancelled) setFinishedMeetingFolder(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isRecording, currentMeetingId]);
+
+  const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
+
+  const canRetranscribe =
+    betaFeatures.importAndRetranscribe &&
+    !isRecording &&
+    !isStopping &&
+    !isProcessingStop &&
+    Boolean(currentMeetingId) &&
+    Boolean(finishedMeetingFolder);
 
   // Convert transcripts to segments for virtualized view
   const segments = useMemo(
@@ -116,17 +165,56 @@ export function TranscriptPanel({
           reading. */}
       {transcripts?.length > 0 && (
         <div className="px-4 pt-4">
-          <p
+          <div
             className="
-              rounded-md border border-border bg-muted px-3 py-2 text-xs
-              text-muted-foreground
+              flex flex-col gap-2 rounded-md border border-border bg-muted px-3
+              py-2
             "
           >
-            <span className="font-medium">Bozza dal vivo.</span> Trascritta a
-            pezzi mentre parli. La versione definitiva si ottiene ritrascrivendo
-            l&apos;audio registrato, ed è più precisa.
-          </p>
+            <p className="text-xs text-muted-foreground">
+              {rebuiltTranscript ? (
+                <>
+                  <span className="font-medium text-foreground">
+                    Versione definitiva pronta.
+                  </span>{" "}
+                  Il testo qui sopra è ancora la bozza: apri la riunione
+                  dall&apos;elenco per leggere quella rifatta sull&apos;audio
+                  intero.
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">
+                    Bozza dal vivo.
+                  </span>{" "}
+                  Trascritta a pezzi di 30 secondi mentre parli, quindi le frasi
+                  si spezzano. La versione definitiva si ottiene
+                  dall&apos;audio registrato ed è più precisa.
+                </>
+              )}
+            </p>
+            {canRetranscribe && !rebuiltTranscript && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={() => setShowRetranscribeDialog(true)}
+              >
+                <RefreshCw size={16} />
+                Trascrivi l&apos;audio registrato
+              </Button>
+            )}
+          </div>
         </div>
+      )}
+
+      {canRetranscribe && currentMeetingId && (
+        <RetranscribeDialog
+          open={showRetranscribeDialog}
+          onOpenChange={setShowRetranscribeDialog}
+          meetingId={currentMeetingId}
+          meetingFolderPath={finishedMeetingFolder}
+          onComplete={() => setRebuiltTranscript(true)}
+        />
       )}
 
       {/* Permission Warning - Not needed on Linux */}
