@@ -14,4 +14,6 @@ pub use engine::{
 };
 pub use provider::{TranscriptResult, TranscriptionError, TranscriptionProvider};
 pub use whisper_provider::WhisperProvider;
-pub use worker::{reset_speech_detected_flag, start_transcription_task, TranscriptUpdate};
+pub use worker::{
+    reset_speech_detected_flag, start_transcription_task, transcription_progress, TranscriptUpdate,
+};

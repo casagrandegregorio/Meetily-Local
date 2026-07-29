@@ -143,13 +143,15 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({
   const streamingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastStreamedIdRef = useRef<string | null>(null); // Track which transcript we've streamed
 
-  // Load preference for showing confidence indicator
+  // Load preference for showing confidence indicator. Off by default: the
+  // local Whisper engine reports no confidence, so the dots would colour every
+  // line by a placeholder value rather than by anything measured.
   const [showConfidence, setShowConfidence] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("showConfidenceIndicator");
-      return saved !== null ? saved === "true" : true; // Default to true
+      return saved !== null ? saved === "true" : false;
     }
-    return true;
+    return false;
   });
 
   // Listen for preference changes from settings

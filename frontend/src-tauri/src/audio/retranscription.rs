@@ -398,7 +398,6 @@ async fn run_retranscription<R: Runtime>(
 
     // Process each speech segment with progress updates.
     let mut all_transcripts: Vec<BatchTranscript> = Vec::new();
-    let mut total_confidence = 0.0f32;
 
     for (i, segment) in processable_segments.iter().enumerate() {
         // Check for cancellation before each segment
@@ -434,7 +433,7 @@ async fn run_retranscription<R: Runtime>(
 
         // Transcribe this segment with Whisper.
         let engine = whisper_engine.as_ref().unwrap();
-        let (text, conf, _) = engine
+        let (text, _confidence, _) = engine
             .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
             .await
             .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
@@ -443,11 +442,10 @@ async fn run_retranscription<R: Runtime>(
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, conf={:.2}, text='{}'",
+                "Segment {}/{}: {:.1}s, text='{}'",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
-                conf,
                 if trimmed.len() > 80 {
                     let mut end = 80;
                     while !trimmed.is_char_boundary(end) {
@@ -483,7 +481,6 @@ async fn run_retranscription<R: Runtime>(
                 speaker,
                 voice_profile_id,
             });
-            total_confidence += conf;
         } else {
             debug!(
                 "Segment {}/{}: {:.1}s — empty transcription",
@@ -495,15 +492,10 @@ async fn run_retranscription<R: Runtime>(
     }
 
     let transcribed_count = all_transcripts.len();
-    let avg_confidence = if transcribed_count > 0 {
-        total_confidence / transcribed_count as f32
-    } else {
-        0.0
-    };
 
     info!(
-        "Transcription complete: {} segments transcribed out of {}, avg confidence: {:.2}",
-        transcribed_count, processable_count, avg_confidence
+        "Transcription complete: {} segments transcribed out of {}",
+        transcribed_count, processable_count
     );
 
     // Check for cancellation

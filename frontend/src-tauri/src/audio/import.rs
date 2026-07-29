@@ -574,7 +574,6 @@ async fn run_import<R: Runtime>(
 
     // Process each speech segment
     let mut segments: Vec<TranscriptSegment> = Vec::new();
-    let mut total_confidence = 0.0f32;
     let mut cancelled = false;
 
     for (i, segment) in processable_segments.iter().enumerate() {
@@ -616,7 +615,7 @@ async fn run_import<R: Runtime>(
 
         // Transcribe with Whisper.
         let engine = whisper_engine.as_ref().unwrap();
-        let (text, conf, _) = engine
+        let (text, _confidence, _) = engine
             .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
             .await
             .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
@@ -624,11 +623,10 @@ async fn run_import<R: Runtime>(
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, conf={:.2}, text='{}'",
+                "Segment {}/{}: {:.1}s, text='{}'",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
-                conf,
                 if trimmed.len() > 80 {
                     let mut end = 80;
                     while !trimmed.is_char_boundary(end) {
@@ -669,7 +667,6 @@ async fn run_import<R: Runtime>(
             // Persist immediately — a crash or cancel must not lose this segment.
             insert_transcript_row(pool, &meeting_id, &transcript_segment).await?;
             segments.push(transcript_segment);
-            total_confidence += conf;
         } else {
             debug!(
                 "Segment {}/{}: {:.1}s — empty transcription",
@@ -681,15 +678,10 @@ async fn run_import<R: Runtime>(
     }
 
     let transcribed_count = segments.len();
-    let avg_confidence = if transcribed_count > 0 {
-        total_confidence / transcribed_count as f32
-    } else {
-        0.0
-    };
 
     info!(
-        "Transcription complete: {} segments transcribed out of {}, avg confidence: {:.2}",
-        transcribed_count, processable_count, avg_confidence
+        "Transcription complete: {} segments transcribed out of {}",
+        transcribed_count, processable_count
     );
 
     if cancelled {

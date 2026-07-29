@@ -600,16 +600,19 @@ pub async fn stop_recording<R: Runtime>(
         }),
     );
 
-    // Wait for transcription task with enhanced progress monitoring (NO TIMEOUT - we must process all chunks)
+    // Wait for the transcription task. No wall-clock deadline: however long the
+    // queue takes, we must process every chunk. Only a stalled engine is cut off.
     let transcription_task = {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         global_task.take()
     };
 
     if let Some(task_handle) = transcription_task {
-        info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
+        info!("⏳ Waiting for ALL transcription chunks to be processed (no time limit while progress continues)");
 
-        // Enhanced progress monitoring during shutdown
+        // Enhanced progress monitoring during shutdown. Reports how many chunks
+        // are actually done, not just how long we have been waiting — the user
+        // needs to see the queue draining to know the app is not stuck.
         let progress_app = app.clone();
         let progress_task = tokio::spawn(async move {
             let last_update = std::time::Instant::now();
@@ -619,36 +622,88 @@ pub async fn stop_recording<R: Runtime>(
 
                 // Emit periodic progress updates during shutdown
                 let elapsed = last_update.elapsed().as_secs();
+                let (completed, queued) = transcription::transcription_progress();
                 let _ = progress_app.emit(
                     "recording-shutdown-progress",
                     serde_json::json!({
                         "stage": "processing_transcripts",
-                        "message": format!("Processing transcripts... ({}s elapsed)", elapsed),
+                        "message": format!(
+                            "Processing transcripts... {}/{} chunks ({}s elapsed)",
+                            completed, queued, elapsed
+                        ),
                         "progress": 40,
                         "detailed": true,
-                        "elapsed_seconds": elapsed
+                        "elapsed_seconds": elapsed,
+                        "chunks_completed": completed,
+                        "chunks_queued": queued
                     }),
                 );
             }
         });
 
-        // Wait up to 10 minutes for transcription completion to prevent indefinite hangs
-        match tokio::time::timeout(
-            tokio::time::Duration::from_secs(600), // 10 minutes max
-            task_handle,
-        )
-        .await
-        {
-            Ok(Ok(())) => {
+        // Wait on *progress*, not on a wall-clock budget.
+        //
+        // This used to be a flat 10-minute cap, which quietly discarded every
+        // chunk still queued when it fired — a 3.5-minute recording came back
+        // with 3 phrases out of 16, the missing ones never having been
+        // transcribed at all. On a CPU-only machine the large model runs many
+        // times slower than real time, so a fixed budget is guaranteed to cut
+        // off work that was proceeding perfectly well.
+        //
+        // The real failure we must still guard against is a wedged engine, and
+        // that one is visible: the completed-chunk counter stops moving. So we
+        // give up only after STALL_LIMIT with zero chunks finished, and let a
+        // slow-but-advancing transcription run to the end.
+        //
+        // STALL_LIMIT must clear the slowest *single* chunk by a wide margin, or
+        // a merely slow engine gets misread as a dead one. Measured worst case
+        // on this hardware: large-v3-turbo-q5_0 on CPU takes ~350s per 30s
+        // window, so 20 minutes leaves better than 3x headroom.
+        const PROGRESS_CHECK: tokio::time::Duration = tokio::time::Duration::from_secs(5);
+        const STALL_LIMIT: tokio::time::Duration = tokio::time::Duration::from_secs(1200);
+
+        let mut task_handle = task_handle;
+        let mut last_completed = 0u64;
+        let mut stalled_for = tokio::time::Duration::ZERO;
+
+        let joined = loop {
+            match tokio::time::timeout(PROGRESS_CHECK, &mut task_handle).await {
+                Ok(result) => break Some(result),
+                Err(_) => {
+                    let (completed, queued) = transcription::transcription_progress();
+                    if completed > last_completed {
+                        last_completed = completed;
+                        stalled_for = tokio::time::Duration::ZERO;
+                    } else {
+                        stalled_for += PROGRESS_CHECK;
+                        if stalled_for >= STALL_LIMIT {
+                            break None;
+                        }
+                    }
+                    info!(
+                        "⏳ Transcription still running: {}/{} chunks done",
+                        completed, queued
+                    );
+                }
+            }
+        };
+
+        match joined {
+            Some(Ok(())) => {
                 info!("✅ ALL transcription chunks processed successfully - no data lost");
             }
-            Ok(Err(e)) => {
+            Some(Err(e)) => {
                 warn!("⚠️ Transcription task completed with error: {:?}", e);
                 // Continue anyway - the worker may have processed most chunks
             }
-            Err(_) => {
-                warn!("⏱️ Transcription timeout (10 minutes) reached, continuing shutdown to prevent indefinite hang");
-                // Continue shutdown even on timeout - better to lose some chunks than hang forever
+            None => {
+                let (completed, queued) = transcription::transcription_progress();
+                warn!(
+                    "⏱️ Transcription made no progress for {} minutes ({}/{} chunks done) - treating the engine as wedged and continuing shutdown",
+                    STALL_LIMIT.as_secs() / 60,
+                    completed,
+                    queued
+                );
             }
         }
 

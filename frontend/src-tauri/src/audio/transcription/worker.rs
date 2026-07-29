@@ -18,6 +18,22 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+// Chunk accounting for the current recording session. Static rather than task-
+// local because the shutdown path needs to tell "still grinding" from "wedged"
+// without a handle on the task's internals: it waits on *progress*, not on a
+// wall-clock budget. Reset at the top of every transcription task; recording is
+// single-session (one global TRANSCRIPTION_TASK), so there is nothing to race.
+static CHUNKS_QUEUED: AtomicU64 = AtomicU64::new(0);
+static CHUNKS_COMPLETED: AtomicU64 = AtomicU64::new(0);
+
+/// `(completed, queued)` chunk counts for the running transcription session.
+pub fn transcription_progress() -> (u64, u64) {
+    (
+        CHUNKS_COMPLETED.load(Ordering::SeqCst),
+        CHUNKS_QUEUED.load(Ordering::SeqCst),
+    )
+}
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
@@ -96,9 +112,10 @@ pub fn start_transcription_task<R: Runtime>(
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
-        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
-        let chunks_queued = Arc::new(AtomicU64::new(0));
-        let chunks_completed = Arc::new(AtomicU64::new(0));
+        // Track completion. Counters are session-global so the shutdown
+        // watchdog can read them; reset here for the new session.
+        CHUNKS_QUEUED.store(0, Ordering::SeqCst);
+        CHUNKS_COMPLETED.store(0, Ordering::SeqCst);
         let input_finished = Arc::new(AtomicBool::new(false));
 
         info!(
@@ -116,9 +133,7 @@ pub fn start_transcription_task<R: Runtime>(
             };
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
-            let chunks_completed_clone = chunks_completed.clone();
             let input_finished_clone = input_finished.clone();
-            let chunks_queued_clone = chunks_queued.clone();
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
@@ -170,7 +185,7 @@ pub fn start_transcription_task<R: Runtime>(
                             if !engine_clone.is_model_loaded().await {
                                 warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
                                 // Still count as completed even if we can't process
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst);
                                 continue;
                             }
 
@@ -204,7 +219,10 @@ pub fn start_transcription_task<R: Runtime>(
                                 .await
                             {
                                 Ok((transcript, confidence_opt, is_partial)) => {
-                                    // Provider-aware confidence threshold
+                                    // Provider-aware confidence threshold. Only
+                                    // bites for engines that report a real score:
+                                    // local Whisper reports `None` and its output
+                                    // is always kept.
                                     let confidence_threshold = match &engine_clone {
                                         TranscriptionEngine::Whisper(_)
                                         | TranscriptionEngine::Provider(_) => 0.3,
@@ -328,7 +346,7 @@ pub fn start_transcription_task<R: Runtime>(
                                         TranscriptionError::AudioTooShort { .. } => {
                                             // Skip silently, this is expected for very short chunks
                                             info!("Worker {}: {}", worker_id, e);
-                                            chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                            CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst);
                                             continue;
                                         }
                                         TranscriptionError::ModelNotLoaded => {
@@ -336,7 +354,7 @@ pub fn start_transcription_task<R: Runtime>(
                                                 "Worker {}: Model unloaded during transcription",
                                                 worker_id
                                             );
-                                            chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                            CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst);
                                             continue;
                                         }
                                         _ => {
@@ -353,8 +371,8 @@ pub fn start_transcription_task<R: Runtime>(
 
                             // Mark chunk as completed
                             let completed =
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst) + 1;
-                            let queued = chunks_queued_clone.load(Ordering::SeqCst);
+                                CHUNKS_COMPLETED.fetch_add(1, Ordering::SeqCst) + 1;
+                            let queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
 
                             // PERFORMANCE: Only log progress every 5th chunk to reduce I/O overhead
                             if completed % 5 == 0 || should_log_this_chunk {
@@ -386,8 +404,8 @@ pub fn start_transcription_task<R: Runtime>(
                             // No more chunks available
                             if input_finished_clone.load(Ordering::SeqCst) {
                                 // Double-check that all queued chunks are actually completed
-                                let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
-                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
+                                let final_queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
+                                let final_completed = CHUNKS_COMPLETED.load(Ordering::SeqCst);
 
                                 if final_completed >= final_queued {
                                     info!(
@@ -417,7 +435,7 @@ pub fn start_transcription_task<R: Runtime>(
         // Main dispatcher: receive chunks and distribute to workers
         let mut receiver = transcription_receiver;
         while let Some(chunk) = receiver.recv().await {
-            let queued = chunks_queued.fetch_add(1, Ordering::SeqCst) + 1;
+            let queued = CHUNKS_QUEUED.fetch_add(1, Ordering::SeqCst) + 1;
             info!(
                 "📥 Dispatching chunk {} to workers (total queued: {})",
                 chunk.chunk_id, queued
@@ -433,7 +451,7 @@ pub fn start_transcription_task<R: Runtime>(
         input_finished.store(true, Ordering::SeqCst);
         drop(work_sender); // Close the channel to signal workers
 
-        let total_chunks_queued = chunks_queued.load(Ordering::SeqCst);
+        let total_chunks_queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
         info!("📭 Input finished with {} total chunks queued. Waiting for all {} workers to complete...",
               total_chunks_queued, NUM_WORKERS);
 
@@ -457,8 +475,8 @@ pub fn start_transcription_task<R: Runtime>(
         const MAX_VERIFICATION_ATTEMPTS: u32 = 10;
 
         loop {
-            let final_queued = chunks_queued.load(Ordering::SeqCst);
-            let final_completed = chunks_completed.load(Ordering::SeqCst);
+            let final_queued = CHUNKS_QUEUED.load(Ordering::SeqCst);
+            let final_completed = CHUNKS_COMPLETED.load(Ordering::SeqCst);
 
             if final_queued == final_completed {
                 info!(
@@ -571,15 +589,15 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                 Ok((text, confidence, is_partial)) => {
                     let cleaned_text = text.trim().to_string();
                     if cleaned_text.is_empty() {
-                        return Ok((String::new(), Some(confidence), is_partial));
+                        return Ok((String::new(), confidence, is_partial));
                     }
 
                     info!(
-                        "Whisper transcription complete for chunk {}: '{}' (confidence: {:.2}, partial: {})",
-                        chunk.chunk_id, cleaned_text, confidence, is_partial
+                        "Whisper transcription complete for chunk {}: '{}' (partial: {})",
+                        chunk.chunk_id, cleaned_text, is_partial
                     );
 
-                    Ok((cleaned_text, Some(confidence), is_partial))
+                    Ok((cleaned_text, confidence, is_partial))
                 }
                 Err(e) => {
                     error!(

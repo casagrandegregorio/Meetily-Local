@@ -166,13 +166,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   });
 
   // UI preferences state
+  // Off by default — see TranscriptView: local Whisper reports no confidence,
+  // so the dots would be coloured by a placeholder rather than a measurement.
   const [showConfidenceIndicator, setShowConfidenceIndicator] =
     useState<boolean>(() => {
       if (typeof window !== "undefined") {
         const saved = localStorage.getItem("showConfidenceIndicator");
-        return saved !== null ? saved === "true" : true;
+        return saved !== null ? saved === "true" : false;
       }
-      return true;
+      return false;
     });
 
   // Summary configs

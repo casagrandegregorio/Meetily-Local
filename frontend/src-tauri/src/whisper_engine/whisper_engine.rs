@@ -559,7 +559,7 @@ impl WhisperEngine {
         &self,
         audio_data: Vec<f32>,
         language: Option<String>,
-    ) -> Result<(String, f32, bool)> {
+    ) -> Result<(String, Option<f32>, bool)> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock
             .as_ref()
@@ -637,8 +637,6 @@ impl WhisperEngine {
             // Suppressor dropped here, stderr restored
         };
         let mut result = String::new();
-        let mut total_confidence = 0.0;
-        let mut segment_count = 0;
 
         for i in 0..num_segments {
             let Some(segment) = state.get_segment(i) else {
@@ -648,16 +646,6 @@ impl WhisperEngine {
                 Ok(text) => text.into_owned(),
                 Err(_) => continue,
             };
-
-            // Calculate confidence based on segment length and duration (simplified approach)
-            let segment_length = segment_text.len() as f32;
-            let segment_confidence = if segment_length > 0.0 {
-                (segment_length / 100.0).min(0.9) + 0.1 // 0.1 to 1.0 confidence based on text length
-            } else {
-                0.1
-            };
-            total_confidence += segment_confidence;
-            segment_count += 1;
 
             let cleaned_text = segment_text.trim();
             if !cleaned_text.is_empty() {
@@ -671,13 +659,13 @@ impl WhisperEngine {
         let final_result = result.trim().to_string();
         let cleaned_result = Self::clean_repetitive_text(&final_result);
 
-        let avg_confidence = if segment_count > 0 {
-            total_confidence / segment_count as f32
-        } else {
-            0.0
-        };
-
-        Ok((cleaned_result, avg_confidence, is_partial))
+        // No confidence is reported: whisper.cpp exposes no usable per-segment
+        // score through this binding. The value returned here used to be
+        // `text_len / 100 + 0.1`, which the worker pool then compared against a
+        // 0.30 threshold — a length filter wearing a confidence costume, which
+        // silently dropped every phrase shorter than 20 characters. Callers
+        // treat `None` as "this engine cannot say", and keep the text.
+        Ok((cleaned_result, None, is_partial))
     }
 
     pub async fn transcribe_audio(
