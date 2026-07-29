@@ -62,6 +62,8 @@ export function TranscriptSettings({
     }
   }, [transcriptModelConfig.provider]);
 
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
   const fetchApiKey = async (provider: string) => {
     try {
       const data = (await invoke("api_get_transcript_api_key", {
@@ -74,6 +76,34 @@ export function TranscriptSettings({
       setApiKey(null);
     }
   };
+
+  /// Write the choice to the database.
+  ///
+  /// Until now the only caller of api_save_transcript_config in the whole app
+  /// was WhisperModelManager, which hardcodes provider: "localWhisper". Picking
+  /// a cloud provider here therefore updated React state and nothing else: the
+  /// selection was gone on restart, and the API key field below had no save
+  /// path at all, so a pasted key was silently discarded and recording quietly
+  /// kept using local Whisper.
+  const persistConfig = async (
+    provider: TranscriptModelProps["provider"],
+    model: string,
+    key: string | null,
+  ) => {
+    setSaveState("saving");
+    try {
+      await invoke("api_save_transcript_config", {
+        provider,
+        model,
+        apiKey: key && key.trim() !== "" ? key.trim() : null,
+      });
+      setTranscriptModelConfig({ ...transcriptModelConfig, provider, model });
+      setSaveState("saved");
+    } catch (err) {
+      console.error("Failed to save transcription settings:", err);
+      setSaveState("error");
+    }
+  };
   const modelOptions = {
     localWhisper: [], // Model selection handled by ModelManager component
     deepgram: ["nova-2-phonecall"],
@@ -83,11 +113,10 @@ export function TranscriptSettings({
     groq: ["whisper-large-v3-turbo", "whisper-large-v3"],
     openai: ["gpt-4o"],
   };
-  const requiresApiKey =
-    transcriptModelConfig.provider === "deepgram" ||
-    transcriptModelConfig.provider === "elevenLabs" ||
-    transcriptModelConfig.provider === "openai" ||
-    transcriptModelConfig.provider === "groq";
+  // Keyed off the dropdown's current value, not the saved one: the key field
+  // has to be reachable *before* anything is saved, otherwise there is no way
+  // to enter the key that saving requires.
+  const requiresApiKey = uiProvider !== "localWhisper";
 
   const handleInputClick = () => {
     if (isApiKeyLocked) {
@@ -132,8 +161,13 @@ export function TranscriptSettings({
             onValueChange={(value) => {
               const provider = value as TranscriptModelProps["provider"];
               setUiProvider(provider);
+              setSaveState("idle");
               if (provider !== "localWhisper") {
                 fetchApiKey(provider);
+                // Persist the choice straight away, with this provider's first
+                // model, so picking a provider and stopping there still leaves
+                // the app in the state the user believes it is in.
+                void persistConfig(provider, modelOptions[provider][0], apiKey);
               }
             }}
           >
@@ -163,11 +197,7 @@ export function TranscriptSettings({
               value={transcriptModelConfig.model}
               onValueChange={(value) => {
                 const model = value as TranscriptModelProps["model"];
-                setTranscriptModelConfig({
-                  ...transcriptModelConfig,
-                  provider: uiProvider,
-                  model,
-                });
+                void persistConfig(uiProvider, model, apiKey);
               }}
             >
               <SelectTrigger className="
@@ -268,6 +298,47 @@ export function TranscriptSettings({
                 )}
               </Button>
             </div>
+          </div>
+
+          {/* Without this the key went nowhere: the field wrote to React state
+              and no code path ever sent it to the backend. Confirmation is part
+              of the fix, not decoration — a key that silently fails to save
+              looks identical to one that saved, and the only symptom is that
+              transcription quietly keeps running on the local engine. */}
+          <div className="mt-3 flex items-center gap-3">
+            <Button
+              size="sm"
+              disabled={
+                isApiKeyLocked ||
+                saveState === "saving" ||
+                !apiKey ||
+                apiKey.trim() === ""
+              }
+              onClick={() => {
+                void persistConfig(
+                  uiProvider,
+                  transcriptModelConfig.model || modelOptions[uiProvider][0],
+                  apiKey,
+                ).then(() => setIsApiKeyLocked(true));
+              }}
+            >
+              {saveState === "saving" ? "Saving…" : "Save key"}
+            </Button>
+            {saveState === "saved" && (
+              <span className="text-sm text-success">
+                Saved. Transcription will use {uiProvider}.
+              </span>
+            )}
+            {saveState === "error" && (
+              <span className="text-sm text-destructive">
+                Could not save — the key was not stored.
+              </span>
+            )}
+            {isApiKeyLocked && saveState === "idle" && (
+              <span className="text-sm text-muted-foreground">
+                Click the padlock to edit, then save.
+              </span>
+            )}
           </div>
         </SettingsCard>
       )}
