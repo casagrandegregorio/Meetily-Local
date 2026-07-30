@@ -11,6 +11,35 @@ use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 use super::recording_state::AudioChunk;
 
+/// Append-only log of transcript lines, kept in the meeting folder *while* the
+/// recording runs.
+///
+/// Why it exists: every accepted line has to survive a crash immediately, and
+/// the way that used to be achieved was to re-serialise and re-write the whole
+/// of `transcripts.json` after each one. That makes the cost of a line grow with
+/// the length of the meeting. Measured on the 2026-07-30 recording: 1392 lines
+/// ending at a 442 kB file, so the last line cost a 442 kB write and the meeting
+/// cost about 300 MB of writes in 1392 rename operations — the fatigue climbing
+/// steadily while the user is still talking.
+///
+/// One appended line costs the same whether it is the first or the thousandth,
+/// so durability stops paying for length. `transcripts.json` is then written
+/// once, at the end.
+///
+/// Two properties worth knowing when reading one of these files by hand:
+///
+/// - It is one JSON object per line, not a JSON document. Parse it a line at a
+///   time.
+/// - A line may appear more than once for the same `sequence_id`, because
+///   `add_transcript_segment` also updates existing segments and an append-only
+///   log records the update rather than replacing the original. **The last entry
+///   for a `sequence_id` is the current one.**
+///
+/// It is deleted once `transcripts.json` has been written and verified, so
+/// **finding one of these next to a finished meeting means that meeting did not
+/// stop cleanly**, and the log is the transcript.
+const TRANSCRIPT_LOG_FILENAME: &str = "transcripts.jsonl";
+
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
@@ -99,7 +128,12 @@ impl RecordingSaver {
     }
 
     /// Add or update a structured transcript segment (upserts based on sequence_id)
-    /// Also saves incrementally to disk
+    ///
+    /// The line is also made durable immediately, by appending it to
+    /// [`TRANSCRIPT_LOG_FILENAME`]. It is deliberately *not* written into
+    /// `transcripts.json` here: that file is produced once, at
+    /// `stop_and_save`, because writing all of it per line made each line cost
+    /// more than the last.
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
         if let Ok(mut segments) = self.transcript_segments.lock() {
             // Check if segment with same sequence_id exists (update it)
@@ -131,10 +165,11 @@ impl RecordingSaver {
             );
         }
 
-        // NEW: Save incrementally to disk
+        // Make the line durable now: one appended record, same cost whether it
+        // is the first line of the meeting or the thousandth.
         if let Some(folder) = &self.meeting_folder {
-            if let Err(e) = self.write_transcripts_json(folder) {
-                warn!("Failed to write incremental transcript update: {}", e);
+            if let Err(e) = self.append_to_transcript_log(folder, &segment) {
+                warn!("Failed to append to the transcript log: {}", e);
             }
         }
     }
@@ -321,6 +356,62 @@ impl RecordingSaver {
         Ok(())
     }
 
+    /// Append one transcript line to [`TRANSCRIPT_LOG_FILENAME`].
+    ///
+    /// Compact JSON, not pretty: this is a record to be replayed, not read for
+    /// pleasure, and pretty-printing would multiply the bytes written for no
+    /// gain.
+    ///
+    /// The file is opened and closed per line rather than kept open in the
+    /// struct. At roughly one line every few seconds the open costs nothing
+    /// measurable, and not holding a handle keeps this method usable from
+    /// `&self` and leaves nothing half-written if the process dies between
+    /// lines.
+    fn append_to_transcript_log(
+        &self,
+        folder: &PathBuf,
+        segment: &TranscriptSegment,
+    ) -> Result<()> {
+        use std::io::Write;
+
+        let log_path = folder.join(TRANSCRIPT_LOG_FILENAME);
+
+        // Build the whole line before opening the file, so a serialisation
+        // failure cannot leave a partial record behind.
+        let mut line = serde_json::to_string(segment)?;
+        line.push('\n');
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        file.write_all(line.as_bytes())?;
+
+        Ok(())
+    }
+
+    /// Remove the append-only log, once `transcripts.json` holds everything it
+    /// held.
+    ///
+    /// Not an error if it was never created — a meeting with no transcript lines
+    /// has no log. Failing to remove it is only a warning: a stale log is
+    /// confusing, but it is not lost data.
+    fn discard_transcript_log(&self, folder: &PathBuf) {
+        let log_path = folder.join(TRANSCRIPT_LOG_FILENAME);
+        match std::fs::remove_file(&log_path) {
+            Ok(()) => info!(
+                "Discarded {} — transcripts.json now holds the transcript",
+                TRANSCRIPT_LOG_FILENAME
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => warn!(
+                "Could not remove the transcript log {}: {}",
+                log_path.display(),
+                e
+            ),
+        }
+    }
+
     /// Write transcripts.json to disk (atomic write with temp file and validation)
     fn write_transcripts_json(&self, folder: &PathBuf) -> Result<()> {
         // Clone segments to avoid holding lock during I/O
@@ -428,7 +519,21 @@ impl RecordingSaver {
 
         if !should_save_audio {
             info!("⚠️  No audio saver initialized (auto-save was disabled) - skipping audio finalization");
-            info!("✅ Transcripts and metadata already saved incrementally");
+
+            // The transcript still has to be turned into transcripts.json here.
+            // This branch used to be able to just return, because
+            // `add_transcript_segment` had rewritten the whole file after every
+            // line; now that the per-line write is an appended log, this is the
+            // only place on this path that produces the file at all.
+            if let Some(folder) = &self.meeting_folder {
+                if let Err(e) = self.write_transcripts_json(folder) {
+                    error!("❌ Failed to write final transcripts: {}", e);
+                    return Err(format!("Failed to save transcripts: {}", e));
+                }
+                self.discard_transcript_log(folder);
+                info!("✅ Transcripts saved (audio auto-save was disabled)");
+            }
+
             return Ok(None);
         }
 
@@ -470,6 +575,10 @@ impl RecordingSaver {
                 "✅ Transcripts saved and verified at: {}",
                 transcript_path.display()
             );
+
+            // Only now, with the file on disk and checked, is the append-only
+            // log redundant.
+            self.discard_transcript_log(folder);
         }
 
         // Update metadata to completed status with actual recording duration
@@ -543,5 +652,149 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// What a transcript line costs while the recording is still running.
+///
+/// The defect these guard against: `add_transcript_segment` used to re-serialise
+/// and re-write the whole of `transcripts.json` on every line, so the thousandth
+/// line of a meeting cost a thousand lines' worth of writing. The fix is that a
+/// line now costs one appended record, and `transcripts.json` is built once at
+/// the end.
+#[cfg(test)]
+mod transcript_durability_tests {
+    use super::*;
+
+    fn saver_in(folder: &std::path::Path) -> RecordingSaver {
+        let mut saver = RecordingSaver::new();
+        saver.meeting_folder = Some(folder.to_path_buf());
+        saver
+    }
+
+    fn segment(sequence_id: u64, text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            id: format!("seg_{}", sequence_id),
+            text: text.to_string(),
+            audio_start_time: sequence_id as f64,
+            audio_end_time: sequence_id as f64 + 1.0,
+            duration: 1.0,
+            display_time: "00:00:00".to_string(),
+            confidence: 0.9,
+            sequence_id,
+            speaker: None,
+            voice_profile_id: None,
+        }
+    }
+
+    /// Read the log back the way a recovery would: one JSON object per line.
+    fn log_lines(folder: &std::path::Path) -> Vec<TranscriptSegment> {
+        let raw = std::fs::read_to_string(folder.join(TRANSCRIPT_LOG_FILENAME))
+            .expect("transcript log missing");
+        raw.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("a log line did not parse"))
+            .collect()
+    }
+
+    /// Every accepted line lands on disk immediately, in order.
+    #[test]
+    fn each_line_is_appended_to_the_log_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let saver = saver_in(dir.path());
+
+        saver.add_transcript_segment(segment(0, "prima riga"));
+        saver.add_transcript_segment(segment(1, "seconda riga"));
+        saver.add_transcript_segment(segment(2, "terza riga"));
+
+        let logged = log_lines(dir.path());
+        let texts: Vec<&str> = logged.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, vec!["prima riga", "seconda riga", "terza riga"]);
+    }
+
+    /// The regression guard: adding lines must NOT produce `transcripts.json`.
+    ///
+    /// If this fails, the whole-file write has crept back into the per-line
+    /// path and the cost of a line is proportional to the meeting again.
+    #[test]
+    fn adding_lines_does_not_write_the_whole_transcript_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let saver = saver_in(dir.path());
+
+        for i in 0..20 {
+            saver.add_transcript_segment(segment(i, "una riga qualunque"));
+        }
+
+        assert!(
+            !dir.path().join("transcripts.json").exists(),
+            "transcripts.json was written during recording; the per-line cost \
+             is proportional to the meeting again"
+        );
+        assert_eq!(log_lines(dir.path()).len(), 20);
+    }
+
+    /// An update to an already-recorded line appends rather than rewriting, so
+    /// the log holds both and the *last* one is current. Pins the rule anyone
+    /// reading a leftover log has to apply.
+    #[test]
+    fn updating_a_line_appends_a_second_record_and_the_last_one_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let saver = saver_in(dir.path());
+
+        saver.add_transcript_segment(segment(7, "prima versione"));
+        saver.add_transcript_segment(segment(7, "versione corretta"));
+
+        let logged = log_lines(dir.path());
+        assert_eq!(logged.len(), 2, "the update should have been appended");
+        assert_eq!(logged.last().unwrap().text, "versione corretta");
+
+        // In memory there is still only one segment: the log is append-only,
+        // the transcript itself is not.
+        let segments = saver.get_transcript_segments();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "versione corretta");
+    }
+
+    /// The log is removed once the real file exists, so a leftover log is a
+    /// meaningful signal rather than routine debris.
+    #[test]
+    fn the_log_is_discarded_once_the_transcript_file_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let saver = saver_in(dir.path());
+
+        saver.add_transcript_segment(segment(0, "una riga"));
+        assert!(dir.path().join(TRANSCRIPT_LOG_FILENAME).exists());
+
+        saver
+            .write_transcripts_json(&dir.path().to_path_buf())
+            .expect("writing transcripts.json failed");
+        saver.discard_transcript_log(&dir.path().to_path_buf());
+
+        assert!(dir.path().join("transcripts.json").exists());
+        assert!(
+            !dir.path().join(TRANSCRIPT_LOG_FILENAME).exists(),
+            "the log outlived the file that replaced it"
+        );
+    }
+
+    /// Discarding a log that was never created is normal, not a failure: a
+    /// meeting where nobody spoke has no log.
+    #[test]
+    fn discarding_an_absent_log_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let saver = saver_in(dir.path());
+
+        saver.discard_transcript_log(&dir.path().to_path_buf());
+    }
+
+    /// A transcript that has never had a folder assigned must not panic — the
+    /// lines are still held in memory.
+    #[test]
+    fn a_saver_with_no_folder_keeps_lines_in_memory_without_writing() {
+        let saver = RecordingSaver::new();
+
+        saver.add_transcript_segment(segment(0, "nessuna cartella"));
+
+        assert_eq!(saver.get_transcript_segments().len(), 1);
     }
 }
