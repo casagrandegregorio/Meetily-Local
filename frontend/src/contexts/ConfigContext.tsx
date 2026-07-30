@@ -156,13 +156,21 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     systemDevice: null,
   });
 
-  // Language preference state
+  // Language preference state.
+  //
+  // Defaults to Italian rather than "auto". "auto" sends no language to the
+  // transcription engine, which then detects one per request — reliable on a
+  // whole file, unreliable on the short fragments live recording produces, where
+  // it yields stray English and German words in an Italian meeting. Matches the
+  // Rust-side default in `src-tauri/src/lib.rs`.
+  //
+  // A stored choice still wins: anyone who has picked a language keeps it.
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("primaryLanguage");
-      return saved || "auto";
+      return saved || "it";
     }
-    return "auto";
+    return "it";
   });
 
   // UI preferences state

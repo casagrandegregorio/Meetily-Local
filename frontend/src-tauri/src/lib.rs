@@ -61,9 +61,21 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
-// Global language preference storage (default to "auto-translate" for automatic translation to English)
+// Global language preference storage.
+//
+// Defaults to Italian, not to auto-detection. Both "auto" and "auto-translate"
+// mean "send no language and let Whisper decide", and Whisper decides *per
+// request* — on a one-second fragment it regularly picks the wrong language, so
+// an Italian meeting comes back sprinkled with "alles good" and "Bye, bye."
+// (measured in the 2026-07-30 recording). Naming the language costs nothing and
+// removes the guess.
+//
+// The frontend overwrites this on mount with whatever it has stored, so this
+// value only governs the window before that call plus any path that runs
+// without a frontend. The frontend's own default is set to match, in
+// `src/contexts/ConfigContext.tsx`.
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
-    std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+    std::sync::LazyLock::new(|| StdMutex::new("it".to_string()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
