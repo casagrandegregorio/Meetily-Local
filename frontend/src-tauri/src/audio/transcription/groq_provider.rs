@@ -64,6 +64,46 @@ const BASE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 /// one unlucky segment from parking a live recording's only worker for minutes.
 const MAX_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How much of the preceding transcript is sent along as context.
+///
+/// Whisper's prompt window holds 224 tokens, roughly 900 characters of Italian,
+/// so this is well short of the format's limit. The limit that matters is a
+/// behavioural one: Whisper sometimes emits the prompt back as if it had heard
+/// it, and the longer the prompt the more text a single echo injects. Two
+/// sentences is enough to establish who is talking about what, and an echo of
+/// two sentences is easy to spot.
+const MAX_PROMPT_CHARS: usize = 200;
+
+/// Below this length the preceding text is not sent at all.
+///
+/// A one-word previous line carries no usable continuity, and the short lines
+/// are disproportionately the hallucinated ones — a bare "Grazie." invented from
+/// room noise. Feeding those back in teaches the model to produce more of them.
+/// The floor keeps real context and drops the filler.
+const MIN_PROMPT_CHARS: usize = 16;
+
+/// The last `max_chars` characters of `s`.
+///
+/// Character-wise, not byte-wise: Italian transcripts are full of accented
+/// letters, and slicing those by byte offset panics.
+fn tail_chars(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    s.chars().skip(total - max_chars).collect()
+}
+
+/// Turn the caller's preceding transcript into the prompt to send, or `None` if
+/// there is nothing worth sending.
+fn prompt_from(preceding_text: Option<&str>) -> Option<String> {
+    let trimmed = preceding_text?.trim();
+    if trimmed.chars().count() < MIN_PROMPT_CHARS {
+        return None;
+    }
+    Some(tail_chars(trimmed, MAX_PROMPT_CHARS))
+}
+
 pub struct GroqProvider {
     api_key: String,
     model: String,
@@ -140,6 +180,7 @@ impl TranscriptionProvider for GroqProvider {
         &self,
         audio: Vec<f32>,
         language: Option<String>,
+        preceding_text: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
         if audio.len() < MIN_SAMPLES {
             return Err(TranscriptionError::AudioTooShort {
@@ -149,6 +190,7 @@ impl TranscriptionProvider for GroqProvider {
         }
 
         let wav = wav_from_f32_mono(&audio, TARGET_SAMPLE_RATE);
+        let prompt = prompt_from(preceding_text.as_deref());
 
         // Retry on the failures that are known to pass. Rebuilding a one-hour
         // meeting is ~150 sequential requests, which on the free tier will meet
@@ -192,6 +234,12 @@ impl TranscriptionProvider for GroqProvider {
             match language.as_deref() {
                 Some("auto") | Some("auto-translate") | None => {}
                 Some(code) => form = form.text("language", code.to_string()),
+            }
+
+            // The tail of the previous line, so the model starts this request
+            // with the sentence already in progress rather than from nothing.
+            if let Some(ref hint) = prompt {
+                form = form.text("prompt", hint.clone());
             }
 
             let attempt_result = self
@@ -418,5 +466,47 @@ mod tests {
         assert!(from_settings(None, None).is_none());
         assert!(from_settings(Some("   ".to_string()), None).is_none());
         assert!(from_settings(Some("gsk_test".to_string()), None).is_some());
+    }
+
+    #[test]
+    fn no_preceding_text_means_no_prompt() {
+        assert!(prompt_from(None).is_none());
+        assert!(prompt_from(Some("   ")).is_none());
+    }
+
+    /// The short hallucinated filler must not become the next request's context.
+    #[test]
+    fn filler_length_previous_lines_are_not_sent_as_context() {
+        assert!(prompt_from(Some("Grazie.")).is_none());
+        assert!(prompt_from(Some("Sì, sì.")).is_none());
+        assert!(
+            prompt_from(Some("Allora, cominciamo dal primo punto.")).is_some(),
+            "a real sentence must survive the floor"
+        );
+    }
+
+    /// A long previous line is cut to the tail — the words nearest the new
+    /// audio are the ones that predict it.
+    #[test]
+    fn a_long_previous_line_is_cut_to_its_tail() {
+        let long = "parola ".repeat(100); // 700 chars
+        let prompt = prompt_from(Some(&long)).expect("expected a prompt");
+
+        assert_eq!(prompt.chars().count(), MAX_PROMPT_CHARS);
+        assert!(
+            long.trim_end().ends_with(prompt.trim_end()),
+            "the kept slice must come from the end, not the start"
+        );
+    }
+
+    /// Cutting must not split a multi-byte character. A byte-wise slice of
+    /// accented Italian panics; this pins the character-wise one.
+    #[test]
+    fn cutting_accented_text_does_not_panic() {
+        let accented = "è perché così andò à ".repeat(40);
+        let prompt = prompt_from(Some(&accented)).expect("expected a prompt");
+
+        assert_eq!(prompt.chars().count(), MAX_PROMPT_CHARS);
+        assert!(prompt.len() > prompt.chars().count(), "expected multi-byte chars");
     }
 }

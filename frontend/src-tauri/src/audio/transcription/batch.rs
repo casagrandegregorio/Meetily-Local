@@ -35,6 +35,7 @@ impl BatchTranscriber {
         &self,
         samples: Vec<f32>,
         language: Option<String>,
+        preceding_text: Option<String>,
     ) -> Result<Vec<TranscriptSpan>> {
         // Every batch caller resamples to 16 kHz before reaching here, so this
         // is the chunk's true length in seconds.
@@ -55,12 +56,17 @@ impl BatchTranscriber {
 
         match self {
             Self::Whisper(engine) => {
+                // `preceding_text` is dropped here: the local engine exposes no
+                // prompt through this binding. See `whisper_provider.rs`.
                 let (text, _confidence, _partial) = engine
                     .transcribe_audio_with_confidence(samples, language)
                     .await?;
                 Ok(whole(text))
             }
-            Self::Remote(provider) => match provider.transcribe(samples, language).await {
+            Self::Remote(provider) => match provider
+                .transcribe(samples, language, preceding_text)
+                .await
+            {
                 Ok(result) => {
                     if result.spans.is_empty() {
                         Ok(whole(result.text))

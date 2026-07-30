@@ -411,6 +411,10 @@ async fn run_retranscription<R: Runtime>(
 
     // Process each speech segment with progress updates.
     let mut all_transcripts: Vec<BatchTranscript> = Vec::new();
+    // Text of the last segment transcribed, handed to the next request as
+    // context. Valid because this loop walks the segments in time order and
+    // waits for each one. See the same note in `import.rs`.
+    let mut preceding_text: Option<String> = None;
 
     for (i, segment) in processable_segments.iter().enumerate() {
         // Check for cancellation before each segment
@@ -447,9 +451,17 @@ async fn run_retranscription<R: Runtime>(
         // Transcribe this segment with whichever engine was selected above.
         let engine = transcriber.as_ref().unwrap();
         let spans = engine
-            .transcribe(segment.samples.clone(), language.clone())
+            .transcribe(
+                segment.samples.clone(),
+                language.clone(),
+                preceding_text.clone(),
+            )
             .await
             .map_err(|e| anyhow!("Transcription failed on segment {}: {}", i, e))?;
+
+        if let Some(last) = spans.last() {
+            preceding_text = Some(last.text.clone());
+        }
 
         if !spans.is_empty() {
             debug!(

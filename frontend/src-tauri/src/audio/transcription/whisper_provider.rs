@@ -23,7 +23,16 @@ impl TranscriptionProvider for WhisperProvider {
         &self,
         audio: Vec<f32>,
         language: Option<String>,
+        preceding_text: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
+        // The local engine accepts no prompt through this binding, so the
+        // history is dropped here rather than used. Stated plainly instead of
+        // being quietly ignored: local Whisper produces slightly worse joins
+        // between consecutive chunks than Groq does, and this is why. Wiring it
+        // means exposing whisper.cpp's `initial_prompt` through
+        // `transcribe_audio_with_confidence`.
+        let _ = preceding_text;
+
         match self
             .engine
             .transcribe_audio_with_confidence(audio, language)

@@ -71,6 +71,21 @@ pub trait TranscriptionProvider: Send + Sync {
     /// # Arguments
     /// * `audio` - Audio samples (16kHz mono, f32 format)
     /// * `language` - Optional language hint (e.g., "en", "es", "fr")
+    /// * `preceding_text` - What was transcribed immediately before this audio,
+    ///   when the caller knows it and knows it is genuinely adjacent. Whisper
+    ///   predicts each word from the words before it, so a request that arrives
+    ///   with no history has to guess the start of the sentence it is being
+    ///   handed the middle of. Passing the previous line back in is how that
+    ///   history is restored across requests.
+    ///
+    ///   It is the *caller's* job to supply this, not the provider's, even
+    ///   though only the provider knows the wire format. A provider holding its
+    ///   own rolling copy would silently be wrong the moment requests stop being
+    ///   issued in chronological order — which is exactly what the planned
+    ///   parallel-Groq work does. Whoever chooses the order owns the context.
+    ///
+    ///   `None` means "no history available", never "history withheld to save
+    ///   effort": a caller that could pass it and doesn't is degrading quality.
     ///
     /// # Returns
     /// * `TranscriptResult` with text, optional confidence, and partial flag
@@ -78,6 +93,7 @@ pub trait TranscriptionProvider: Send + Sync {
         &self,
         audio: Vec<f32>,
         language: Option<String>,
+        preceding_text: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError>;
 
     /// Check if a model is currently loaded

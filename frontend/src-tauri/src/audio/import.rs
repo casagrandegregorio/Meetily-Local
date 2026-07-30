@@ -585,6 +585,12 @@ async fn run_import<R: Runtime>(
     // Process each speech segment
     let mut segments: Vec<TranscriptSegment> = Vec::new();
     let mut cancelled = false;
+    // Text of the last segment transcribed, handed to the next request as
+    // context. Valid because this loop walks the segments in time order and
+    // waits for each one: the previous transcript really is what came just
+    // before. Any change that reorders or parallelises this loop has to
+    // reconsider what belongs here.
+    let mut preceding_text: Option<String> = None;
 
     for (i, segment) in processable_segments.iter().enumerate() {
         if IMPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -626,9 +632,17 @@ async fn run_import<R: Runtime>(
         // Transcribe with whichever engine was selected above.
         let engine = transcriber.as_ref().unwrap();
         let spans = engine
-            .transcribe(segment.samples.clone(), language.clone())
+            .transcribe(
+                segment.samples.clone(),
+                language.clone(),
+                preceding_text.clone(),
+            )
             .await
             .map_err(|e| anyhow!("Transcription failed on segment {}: {}", i, e))?;
+
+        if let Some(last) = spans.last() {
+            preceding_text = Some(last.text.clone());
+        }
 
         if !spans.is_empty() {
             debug!(

@@ -191,6 +191,18 @@ pub fn start_transcription_task<R: Runtime>(
                     );
                 }
 
+                // The last line this worker produced, handed to the next request
+                // as context so the model does not restart from nothing on every
+                // segment.
+                //
+                // Held per worker, and correct only because there is exactly one
+                // (`NUM_WORKERS == 1`), which is also what keeps the emitted
+                // transcript in chronological order. Adding workers, or issuing
+                // several Groq requests at once, breaks the "last line" claim
+                // before it breaks the ordering — whoever does that work owns
+                // this variable too.
+                let mut preceding_text: Option<String> = None;
+
                 loop {
                     // Try to get a chunk to process
                     let chunk = {
@@ -246,9 +258,18 @@ pub fn start_transcription_task<R: Runtime>(
                                     None
                                 };
 
-                            // Transcribe with provider-agnostic approach
-                            match transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
-                                .await
+                            // Transcribe with provider-agnostic approach.
+                            // The context is cloned rather than borrowed: the
+                            // borrow would still be live across the match arms
+                            // below, which is where it gets reassigned.
+                            let context = preceding_text.clone();
+                            match transcribe_chunk_with_provider(
+                                &engine_clone,
+                                chunk,
+                                &app_clone,
+                                context,
+                            )
+                            .await
                             {
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold. Only
@@ -276,6 +297,16 @@ pub fn start_transcription_task<R: Runtime>(
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
                                               worker_id, transcript, confidence_str, is_partial);
+
+                                        // Carry this line forward as the next
+                                        // request's context. Only lines we
+                                        // actually keep feed it: a dropped or
+                                        // empty result leaves the previous
+                                        // context standing rather than blanking
+                                        // it, so one bad segment does not cost
+                                        // the following one its history.
+                                        preceding_text =
+                                            Some(transcript.trim().to_string());
 
                                         // Emit speech-detected event for frontend UX (only on first detection per session)
                                         // This is lightweight and provides better user feedback
@@ -553,6 +584,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
     engine: &TranscriptionEngine,
     chunk: AudioChunk,
     app: &AppHandle<R>,
+    preceding_text: Option<String>,
 ) -> std::result::Result<(String, Option<f32>, bool), TranscriptionError> {
     // Convert to 16kHz mono for transcription
     let transcription_data = if chunk.sample_rate != 16000 {
@@ -613,6 +645,9 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
         TranscriptionEngine::Whisper(whisper_engine) => {
             // Get language preference from global state
             let language = crate::get_language_preference_internal();
+            // Dropped: no prompt path through this binding. See
+            // `whisper_provider.rs`.
+            let _ = preceding_text;
 
             match whisper_engine
                 .transcribe_audio_with_confidence(speech_samples, language)
@@ -655,7 +690,10 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             // NEW: Trait-based provider (clean, unified interface)
             let language = crate::get_language_preference_internal();
 
-            match provider.transcribe(speech_samples, language).await {
+            match provider
+                .transcribe(speech_samples, language, preceding_text)
+                .await
+            {
                 Ok(result) => {
                     let cleaned_text = result.text.trim().to_string();
                     if cleaned_text.is_empty() {
