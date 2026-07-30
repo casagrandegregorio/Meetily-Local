@@ -201,6 +201,24 @@ impl LoudnessNormalizer {
         const TARGET_LUFS: f64 = -23.0;
         const ANALYZE_CHUNK_SIZE: usize = 512;
 
+        // Ceiling on how much this stage may *lift* a quiet signal.
+        //
+        // Without a ceiling the rule is simply "apply however many dB are
+        // missing from the target", and during a lull that target is chased with
+        // nothing but room noise to chase it with: a room measuring -55 LUFS
+        // asks for 32 dB, a factor of 10^(32/20) ≈ 40 on amplitude. The noise
+        // floor then arrives at the voice detector as loud as speech, the
+        // detector (threshold 0.45, see `vad.rs`) calls it speech, and Whisper
+        // writes words out of it — 65 lines reading only "Grazie." in the
+        // 2026-07-30 meeting.
+        //
+        // 12 dB (a factor of 4) keeps the useful half of the behaviour: a
+        // genuinely quiet microphone sits roughly 6-12 dB under target and still
+        // gets fully corrected, while the 30-45 dB a silent room asks for is
+        // refused. Attenuation is deliberately *not* capped — pulling a too-loud
+        // signal down is always safe.
+        const MAX_MAKEUP_GAIN_DB: f64 = 12.0;
+
         let mut normalized_samples = Vec::with_capacity(samples.len());
 
         for &sample in samples {
@@ -215,7 +233,8 @@ impl LoudnessNormalizer {
                     // Update gain based on cumulative loudness
                     if let Ok(current_lufs) = self.ebur128.loudness_global() {
                         if current_lufs.is_finite() && current_lufs < 0.0 {
-                            let gain_db = TARGET_LUFS - current_lufs;
+                            let gain_db =
+                                (TARGET_LUFS - current_lufs).min(MAX_MAKEUP_GAIN_DB);
                             self.gain_linear = 10_f32.powf(gain_db as f32 / 20.0);
                         }
                     }
@@ -764,4 +783,64 @@ pub fn write_transcript_json_to_file(
     std::fs::write(&file_path, json_string)?;
 
     Ok(file_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod loudness_tests {
+    use super::*;
+
+    /// A 1 kHz tone at the given amplitude, `seconds` long at 48 kHz.
+    ///
+    /// A tone rather than a constant because EBU R128 measures K-weighted
+    /// loudness, and K-weighting starts with a high-pass: a DC level measures
+    /// as silence and would make any assertion below vacuous.
+    fn tone(amplitude: f32, seconds: f32) -> Vec<f32> {
+        let sample_rate = 48_000.0f32;
+        let n = (sample_rate * seconds) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                amplitude * (2.0 * std::f32::consts::PI * 1_000.0 * t).sin()
+            })
+            .collect()
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max)
+    }
+
+    /// Quiet input is lifted, but only up to the makeup-gain ceiling.
+    ///
+    /// A 1 kHz tone at amplitude 0.01 measures about -43 LUFS (K-weighting is
+    /// roughly flat at 1 kHz, so 20·log10(0.01/√2) ≈ -43). The -23 LUFS target
+    /// is therefore 20 dB away, and the uncapped rule would apply all 20 —
+    /// a factor of 10, taking the peak to ~0.1. The 12 dB ceiling caps it at a
+    /// factor of ~4, so the peak lands near 0.04.
+    ///
+    /// This is the guard on the noise-becomes-speech path: whatever this stage
+    /// is allowed to multiply a quiet room by, the voice detector downstream
+    /// receives.
+    #[test]
+    fn quiet_input_is_lifted_but_not_by_more_than_the_ceiling() {
+        let input = tone(0.01, 3.0);
+        let input_peak = peak(&input);
+
+        let mut normalizer =
+            LoudnessNormalizer::new(1, 48_000).expect("normalizer construction failed");
+        let output = normalizer.normalize_loudness(&input);
+        let output_peak = peak(&output);
+
+        assert!(
+            output_peak > input_peak * 2.0,
+            "quiet input was barely lifted at all: {:.4} → {:.4}",
+            input_peak,
+            output_peak
+        );
+        assert!(
+            output_peak < input_peak * 6.0,
+            "makeup gain reached {:.1}x, past the 4x (12 dB) ceiling — an \
+             uncapped run reaches ~10x",
+            output_peak / input_peak
+        );
+    }
 }
