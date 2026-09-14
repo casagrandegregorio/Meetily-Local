@@ -3,19 +3,26 @@
 //! scrive Meetily) e, quando i nostri script hanno trascritto,
 //! `trascrizione.md` e `voci.json`.
 //!
-//! Tre comandi, tutti in sola lettura:
+//! Tre comandi in sola lettura:
 //! - `list_pending_recordings`: le cartelle con audio e senza `trascrizione.md`;
 //! - `list_transcribed_recordings`: quelle con `trascrizione.md`;
 //! - `read_transcript`: il testo di una.
 //!
+//! E quelli che lanciano il lavoro, piu' sotto: `start_transcription`,
+//! `transcription_progress`, `get/set_transcriber_folder`.
+//!
 //! «Gia' trascritta» lo dice il disco, non il database dell'app (deciso il
 //! 09-09): le 25 riunioni trascritte fuori da Meetily contano come pronte.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri_plugin_store::StoreExt;
 
 use crate::audio::recording_preferences::load_recording_preferences;
 
@@ -197,4 +204,243 @@ pub async fn read_transcript<R: Runtime>(
     let dir = radice.join(nome_sicuro(&folder)?);
     std::fs::read_to_string(dir.join(TESTO))
         .map_err(|e| format!("Cannot read {} in {:?}: {}", TESTO, dir, e))
+}
+
+// ---------------------------------------------------------------------------
+// Lanciare la trascrizione (il pulsante TRASCRIVI).
+//
+// Il testo non lo fa l'app: lo fanno i nostri script Python
+// (`trascrivi/riunione.py`, nel repo di configurazione, non qui). L'app li
+// lancia come programma a parte con `uv run riunione.py <cartella>` — le
+// librerie che servono stanno scritte in testa allo script, `uv` le procura
+// da solo — e poi guarda a che punto e' leggendo `avanzamento.json`, che lo
+// script scrive nella cartella a ogni fase (avviata, testo, voci, fatto;
+// oppure muta, errore).
+//
+// Dove stanno gli script lo dice `trascrivi.json` nello store dell'app
+// (chiave `cartella`), separato dalle preferenze di Meetily: la pagina delle
+// impostazioni le riscrive per intero, e una chiave in piu' li' sparirebbe.
+// ---------------------------------------------------------------------------
+
+/// Le cartelle con una trascrizione in corso adesso. Serve a non lanciarne
+/// due sulla stessa riunione, e a distinguere «sta lavorando» da «il
+/// programma e' morto a meta'» (la fase del testo dura 8 minuti senza
+/// scrivere niente: il file da solo non lo direbbe).
+#[derive(Default)]
+pub struct InCorso(Mutex<HashSet<String>>);
+
+const AVANZAMENTO: &str = "avanzamento.json";
+const REGISTRO: &str = "trascrizione.log";
+const SCRIPT: &str = "riunione.py";
+const STORE_TRASCRIVI: &str = "trascrivi.json";
+
+/// Quello che lo script scrive in `avanzamento.json`, com'e'.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Avanzamento {
+    pub fase: String,
+    #[serde(default)]
+    pub totale_minuti: Option<f64>,
+    #[serde(default)]
+    pub iniziato_il: Option<String>,
+    #[serde(default)]
+    pub aggiornato_il: Option<String>,
+    #[serde(default)]
+    pub percento_voce: Option<u32>,
+    #[serde(default)]
+    pub messaggio: Option<String>,
+}
+
+fn cartella_script<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let store = app
+        .store(STORE_TRASCRIVI)
+        .map_err(|e| format!("Cannot open store {}: {}", STORE_TRASCRIVI, e))?;
+    let cartella = store
+        .get("cartella")
+        .and_then(|v| v.as_str().map(PathBuf::from))
+        .ok_or_else(|| {
+            "Non so dove stanno gli script che trascrivono: va detto nelle impostazioni \
+             (la cartella con dentro riunione.py)."
+                .to_string()
+        })?;
+    if !cartella.join(SCRIPT).is_file() {
+        return Err(format!("In {:?} non c'e' {}.", cartella, SCRIPT));
+    }
+    Ok(cartella)
+}
+
+/// La cartella degli script, se e' stata detta.
+#[tauri::command]
+pub async fn get_transcriber_folder<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<String>, String> {
+    let store = app
+        .store(STORE_TRASCRIVI)
+        .map_err(|e| format!("Cannot open store {}: {}", STORE_TRASCRIVI, e))?;
+    Ok(store
+        .get("cartella")
+        .and_then(|v| v.as_str().map(str::to_string)))
+}
+
+/// Dice all'app dove stanno gli script: accetta solo una cartella con
+/// dentro `riunione.py`.
+#[tauri::command]
+pub async fn set_transcriber_folder<R: Runtime>(
+    app: AppHandle<R>,
+    folder: String,
+) -> Result<(), String> {
+    if !Path::new(&folder).join(SCRIPT).is_file() {
+        return Err(format!("In {:?} non c'e' {}.", folder, SCRIPT));
+    }
+    let store = app
+        .store(STORE_TRASCRIVI)
+        .map_err(|e| format!("Cannot open store {}: {}", STORE_TRASCRIVI, e))?;
+    store.set("cartella", serde_json::Value::String(folder));
+    store
+        .save()
+        .map_err(|e| format!("Cannot save store {}: {}", STORE_TRASCRIVI, e))
+}
+
+/// Fa partire la trascrizione di una cartella e torna subito: il lavoro
+/// va avanti da solo, l'app lo segue con `transcription_progress`. Quando
+/// il programma finisce, in qualunque modo, l'app riceve l'evento
+/// `transcription-finished` con `{ folder, ok }`.
+#[tauri::command]
+pub async fn start_transcription<R: Runtime>(
+    app: AppHandle<R>,
+    in_corso: tauri::State<'_, InCorso>,
+    folder: String,
+) -> Result<(), String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let dir = radice.join(nome_sicuro(&folder)?);
+    if !dir.join(AUDIO).is_file() {
+        return Err(format!("In {:?} non c'e' {}.", dir, AUDIO));
+    }
+    if dir.join(TESTO).is_file() {
+        return Err(format!("{:?} e' gia' trascritta.", folder));
+    }
+    let script_dir = cartella_script(&app)?;
+
+    {
+        let mut set = in_corso.0.lock().map_err(|e| e.to_string())?;
+        if !set.insert(folder.clone()) {
+            return Err(format!("{:?} si sta gia' trascrivendo.", folder));
+        }
+    }
+    let ritira = |app: &AppHandle<R>| {
+        if let Ok(mut set) = app.state::<InCorso>().0.lock() {
+            set.remove(&folder);
+        }
+    };
+
+    // Tutto quello che lo script stampa — comprese le domande per Greg alla
+    // fine — resta nella cartella, accanto all'audio.
+    let registro = std::fs::File::create(dir.join(REGISTRO))
+        .map_err(|e| format!("Cannot create {}: {}", REGISTRO, e));
+    let registro = match registro {
+        Ok(f) => f,
+        Err(e) => {
+            ritira(&app);
+            return Err(e);
+        }
+    };
+    let registro_err = registro.try_clone().map_err(|e| e.to_string());
+    let registro_err = match registro_err {
+        Ok(f) => f,
+        Err(e) => {
+            ritira(&app);
+            return Err(e);
+        }
+    };
+
+    // «avviata» subito, prima che `uv` abbia finito di procurarsi le librerie:
+    // cosi' la scheda ha qualcosa da mostrare da subito. Lo script poi lo
+    // riscrive.
+    let _ = std::fs::write(
+        dir.join(AVANZAMENTO),
+        serde_json::to_string_pretty(&Avanzamento {
+            fase: "avviata".into(),
+            totale_minuti: None,
+            iniziato_il: Some(chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()),
+            aggiornato_il: None,
+            percento_voce: None,
+            messaggio: None,
+        })
+        .unwrap_or_default(),
+    );
+
+    let mut comando = Command::new("uv");
+    comando
+        .arg("run")
+        .arg(script_dir.join(SCRIPT))
+        .arg(&dir)
+        .current_dir(&script_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(registro))
+        .stderr(Stdio::from(registro_err));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        comando.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut figlio = match comando.spawn() {
+        Ok(f) => f,
+        Err(e) => {
+            ritira(&app);
+            let _ = std::fs::remove_file(dir.join(AVANZAMENTO));
+            return Err(if e.kind() == std::io::ErrorKind::NotFound {
+                "Non trovo `uv` su questo PC: e' il programma che fa girare gli script \
+                 (astral.sh/uv). Va installato e poi l'app riavviata."
+                    .to_string()
+            } else {
+                format!("Cannot start {}: {}", SCRIPT, e)
+            });
+        }
+    };
+    log::info!("Trascrizione avviata su {:?} (pid {})", folder, figlio.id());
+
+    let app2 = app.clone();
+    let folder2 = folder.clone();
+    std::thread::spawn(move || {
+        let esito = figlio.wait();
+        let ok = esito.as_ref().map(|s| s.success()).unwrap_or(false);
+        log::info!("Trascrizione finita su {:?}: {:?}", folder2, esito);
+        if let Ok(mut set) = app2.state::<InCorso>().0.lock() {
+            set.remove(&folder2);
+        }
+        let _ = app2.emit(
+            "transcription-finished",
+            serde_json::json!({ "folder": folder2, "ok": ok }),
+        );
+    });
+    Ok(())
+}
+
+/// A che punto e' una cartella: quello che c'e' in `avanzamento.json`,
+/// `null` se non c'e'. Se il file dice «in corso» ma nessun programma sta
+/// girando su quella cartella, la fase diventa `interrotta`.
+#[tauri::command]
+pub async fn transcription_progress<R: Runtime>(
+    app: AppHandle<R>,
+    in_corso: tauri::State<'_, InCorso>,
+    folder: String,
+) -> Result<Option<Avanzamento>, String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let dir = radice.join(nome_sicuro(&folder)?);
+    let Some(mut stato) = leggi_json::<Avanzamento>(&dir.join(AVANZAMENTO)) else {
+        return Ok(None);
+    };
+    let in_lavoro = matches!(stato.fase.as_str(), "avviata" | "testo" | "voci");
+    if in_lavoro {
+        let vivo = in_corso
+            .0
+            .lock()
+            .map(|set| set.contains(&folder))
+            .unwrap_or(false);
+        if !vivo {
+            stato.fase = "interrotta".into();
+        }
+    }
+    Ok(Some(stato))
 }

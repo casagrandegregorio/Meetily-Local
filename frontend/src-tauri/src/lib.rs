@@ -620,6 +620,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
+        .manage(riunioni::InCorso::default())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
@@ -895,6 +896,10 @@ pub fn run() {
             riunioni::list_pending_recordings,
             riunioni::list_transcribed_recordings,
             riunioni::read_transcript,
+            riunioni::start_transcription,
+            riunioni::transcription_progress,
+            riunioni::get_transcriber_folder,
+            riunioni::set_transcriber_folder,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,
