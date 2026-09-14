@@ -9,8 +9,13 @@ export interface Arretrata {
   folder: string;
   /** durata dell'audio, in minuti interi */
   minutes: number;
-  /** vero quando dentro non c'e' praticamente voce: si trascrive lo stesso, ma su richiesta */
-  silent: boolean;
+  /**
+   * `true` quando dentro non c'e' praticamente voce (si trascrive lo stesso,
+   * ma su richiesta); `null` se nessuno l'ha ancora misurato. Lo misura il
+   * nostro script dei livelli e lo scrive in `livello.json` nella cartella;
+   * il lato Rust lo legge da li'.
+   */
+  silent: boolean | null;
 }
 
 /** Il comando Tauri che elenca le cartelle senza `trascrizione.md`. */

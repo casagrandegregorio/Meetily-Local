@@ -43,6 +43,8 @@ pub mod groq;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
+// le riunioni come stanno sul disco: arretrate, trascritte, il testo di una
+pub mod riunioni;
 pub mod openai;
 pub mod openrouter;
 pub mod speaker_diarization;
@@ -890,6 +892,9 @@ pub fn run() {
             summary::summary_engine::commands::builtin_ai_get_recommended_model,
             openrouter::get_openrouter_models,
             audio::recording_preferences::get_recording_preferences,
+            riunioni::list_pending_recordings,
+            riunioni::list_transcribed_recordings,
+            riunioni::read_transcript,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,
