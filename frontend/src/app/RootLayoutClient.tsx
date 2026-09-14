@@ -16,7 +16,11 @@ import { TranscriptProvider } from "@/contexts/TranscriptContext";
 import { ConfigProvider } from "@/contexts/ConfigContext";
 import { OnboardingProvider } from "@/contexts/OnboardingContext";
 import { SidebarProvider } from "@/components/Sidebar/SidebarProvider";
-import { RecordingPostProcessingProvider } from "@/contexts/RecordingPostProcessingProvider";
+// `RecordingPostProcessingProvider` non si monta piu': ascoltava
+// `recording-stop-complete` e, da qualunque pagina, faceva partire la
+// trascrizione, salvava nel database e saltava a meeting-details. Qui allo
+// Stop la registrazione resta «registrata» finche' non si preme TRASCRIVI
+// (deciso l'08-09). Resta nel repo; il nostro Stop e' `useFermaRegistrazione`.
 import { ImportDialogProvider } from "@/contexts/ImportDialogContext";
 
 import { TitleBar } from "@/components/TitleBar";
@@ -38,7 +42,6 @@ const PROVIDERS = [
   OnboardingProvider,
   SidebarProvider,
   TooltipProvider,
-  RecordingPostProcessingProvider,
   ImportDialogProvider,
 ];
 

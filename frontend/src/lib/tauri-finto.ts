@@ -22,10 +22,11 @@ export function siamoNelFinto(): boolean {
 // `stop_recording`, e `is_recording` / `get_recording_state` dicono la verita'.
 // Senza questo stato, dopo REGISTRA l'app chiedeva «sto registrando?» e la
 // risposta fissa `false` la rimetteva ferma un attimo dopo.
-let registrazioneFinta: { dal: number } | null = null;
+let registrazioneFinta: { dal: number; folder: string } | null = null;
 const statoRegistrazioneFinta = () => ({
   is_recording: registrazioneFinta !== null,
   is_paused: false,
+  is_active: registrazioneFinta !== null,
   recording_duration: registrazioneFinta
     ? Math.floor((Date.now() - registrazioneFinta.dal) / 1000)
     : null,
@@ -33,6 +34,52 @@ const statoRegistrazioneFinta = () => ({
     ? Math.floor((Date.now() - registrazioneFinta.dal) / 1000)
     : null,
 });
+
+// Gli ascoltatori registrati con `listen` di Tauri, per poter mandare gli
+// eventi che il backend vero manda: senza `recording-started` il contesto di
+// Meetily non fa partire l'orologio, senza `recording-stopped` la scheda non
+// sa in che cartella e' finita la registrazione.
+const ascoltatoriFinti = new Map<number, { event: string; handler: number }>();
+let prossimoAscoltatore = 1;
+function emettiFinto(event: string, payload: unknown) {
+  for (const { event: nome, handler } of ascoltatoriFinti.values()) {
+    if (nome !== event) continue;
+    const callback = (window as any)[`_${handler}`];
+    if (typeof callback === "function") callback({ event, id: handler, payload });
+  }
+}
+
+/** La cartella che Meetily creerebbe adesso: `Meeting AAAA-MM-GG_hh-mm-ss_...`. */
+function cartellaFintaDiAdesso(): string {
+  const d = new Date();
+  const z = (n: number) => String(n).padStart(2, "0");
+  const locale = `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+  const ora = `${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`;
+  const utc = `${z(d.getUTCHours())}-${z(d.getUTCMinutes())}`;
+  return `Meeting ${locale}_${ora}_${locale}_${utc}`;
+}
+
+function avviaRegistrazioneFinta() {
+  registrazioneFinta = { dal: Date.now(), folder: cartellaFintaDiAdesso() };
+  // il backend vero lo manda dopo un attimo, non dentro la chiamata
+  setTimeout(() => emettiFinto("recording-started", null), 50);
+  return null;
+}
+
+function fermaRegistrazioneFinta() {
+  const folder = registrazioneFinta?.folder;
+  registrazioneFinta = null;
+  setTimeout(
+    () =>
+      emettiFinto("recording-stopped", {
+        message: "Recording stopped",
+        folder_path: folder ? `C:\\Users\\gcasagrande\\Music\\meetily-recordings\\${folder}` : undefined,
+        meeting_name: folder,
+      }),
+    50,
+  );
+  return null;
+}
 
 // due riunioni finte, coi nomi di fantasia gia' in uso nel progetto
 const risposteFinte: Record<string, unknown> = {
@@ -55,11 +102,14 @@ const risposteFinte: Record<string, unknown> = {
   is_recording: () => registrazioneFinta !== null,
   is_recording_paused: false,
   get_recording_state: () => statoRegistrazioneFinta(),
-  start_recording: () => { registrazioneFinta = { dal: Date.now() }; return null; },
-  start_recording_with_meeting_name: () => { registrazioneFinta = { dal: Date.now() }; return null; },
-  start_recording_with_devices: () => { registrazioneFinta = { dal: Date.now() }; return null; },
-  start_recording_with_devices_and_meeting: () => { registrazioneFinta = { dal: Date.now() }; return null; },
-  stop_recording: () => { registrazioneFinta = null; return null; },
+  // stessa trappola: `[]` vale vero, e l'app diceva «collegata a un evento
+  // del calendario» che non esiste
+  calendar_find_event_for_now: null,
+  start_recording: avviaRegistrazioneFinta,
+  start_recording_with_meeting_name: avviaRegistrazioneFinta,
+  start_recording_with_devices: avviaRegistrazioneFinta,
+  start_recording_with_devices_and_meeting: avviaRegistrazioneFinta,
+  stop_recording: fermaRegistrazioneFinta,
   // il monitor dei livelli audio: nel finto non manda eventi, e le barrette
   // restano ferme. Basta che i comandi non esplodano.
   start_audio_level_monitoring: null,
@@ -193,6 +243,19 @@ export function installaTauriFinto() {
     // il codice si aspetta una lista, e due riunioni finte perche' una barra
     // laterale vuota non dice niente su come sara' davvero.
     invoke: async (comando: string, argomenti?: Record<string, unknown>) => {
+      // Gli eventi. `listen` di Tauri chiama `plugin:event|listen` passando
+      // il numero della callback (fatto da `transformCallback`); qui lo si
+      // tiene da parte, e `emettiFinto` lo richiama quando serve.
+      if (comando === "plugin:event|listen") {
+        const { event, handler } = argomenti as { event: string; handler: number };
+        const id = prossimoAscoltatore++;
+        ascoltatoriFinti.set(id, { event, handler });
+        return id;
+      }
+      if (comando === "plugin:event|unlisten") {
+        ascoltatoriFinti.delete((argomenti as { eventId: number }).eventId);
+        return null;
+      }
       const risposta = risposteFinte[comando];
       // una risposta puo' essere una funzione degli argomenti: e' il caso dei
       // comandi che leggono un file dal disco

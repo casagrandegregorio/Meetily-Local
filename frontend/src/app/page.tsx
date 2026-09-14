@@ -17,7 +17,7 @@ import { useConfig } from "@/contexts/ConfigContext";
 import { useModalState } from "@/hooks/useModalState";
 import { useRecordingStateSync } from "@/hooks/useRecordingStateSync";
 import { useRecordingStart } from "@/hooks/useRecordingStart";
-import { useRecordingStop } from "@/hooks/useRecordingStop";
+import { useFermaRegistrazione } from "@/hooks/useFermaRegistrazione";
 import { useTranscriptRecovery } from "@/hooks/useTranscriptRecovery";
 import { TranscriptRecovery } from "@/components/TranscriptRecovery";
 import { indexedDBService } from "@/services/indexedDBService";
@@ -62,10 +62,10 @@ export default function Home() {
     setIsRecordingState,
     showModal,
   );
-  const { handleRecordingStop, setIsStopping } = useRecordingStop(
-    setIsRecordingState,
-    setIsRecordingDisabled,
-  );
+  // Lo Stop nostro: ferma il backend e basta, la registrazione resta
+  // «registrata». `useRecordingStop` di Meetily (trascrizione, database,
+  // salto a meeting-details) resta nel repo, non usato.
+  const { registrata, ferma, scarta } = useFermaRegistrazione(setIsRecordingState);
 
   // Recovery
   const {
@@ -221,24 +221,32 @@ export default function Home() {
   const livelliAudio = useAudioLevels(nomiDaAscoltare);
   const livelli = Array.from(livelliAudio.values()).map((l) => l.rms_level);
 
-  // Il momento della scheda, letto dallo stato vero. Il flusso di Meetily
-  // arriva a «ferma» e «registra»; dopo lo Stop passa da `useRecordingStop`,
-  // che oggi porta a `meeting-details`. I momenti dopo lo Stop — registrata,
-  // trascrive, pronta, muta — li accendera' l'idraulica.
+  // Il momento della scheda, letto dallo stato vero: ferma, registra, e dopo
+  // lo Stop «registrata» finche' non si preme TRASCRIVI. I tre momenti dopo
+  // — trascrive, pronta, muta — li accendera' il comando che lancia la
+  // trascrizione, ancora da scrivere sul lato Rust.
   const momentoVero: Momento = isRecording
     ? { tipo: "registra", secondi: recordingState.recordingDuration }
-    : { tipo: "ferma" };
+    : registrata
+      ? { tipo: "registrata", ...registrata }
+      : { tipo: "ferma" };
 
   // Nel finto, `/?momento=pronta` mostra un momento a scelta, con dati veri:
   // e' la galleria 5 dal vivo. Nell'app vera questa riga non fa niente.
   const momentoChiesto = useMomentoFinto();
   const momento = momentoChiesto ?? momentoVero;
 
-  // Le azioni della scheda che aspettano l'idraulica: per ora si limitano a
-  // dire in console cosa farebbero. «Butta» cancella l'audio: quando sara'
-  // collegata, vorra' una conferma.
-  const trascrivi = (folder: string) => console.info("[scheda] TRASCRIVI", folder);
-  const butta = (folder: string) => console.info("[scheda] BUTTA", folder);
+  // Le due azioni che aspettano ancora il lato Rust: per ora dicono in console
+  // cosa farebbero e tolgono la scheda «registrata». «Butta» cancella
+  // l'audio: quando sara' collegata, vorra' una conferma.
+  const trascrivi = (folder: string) => {
+    console.info("[scheda] TRASCRIVI", folder);
+    scarta();
+  };
+  const butta = (folder: string) => {
+    console.info("[scheda] BUTTA", folder);
+    scarta();
+  };
   const apri = (folder: string) =>
     router.push(`/trascritte/leggi?folder=${encodeURIComponent(folder)}`);
 
@@ -270,10 +278,7 @@ export default function Home() {
               livelli={livelli}
               onStart={handleStartClick}
               isStarting={isStarting || isRecordingDisabled}
-              onStop={() => {
-                setIsStopping(true);
-                void handleRecordingStop(true);
-              }}
+              onStop={() => void ferma(recordingState.recordingDuration)}
               onTrascrivi={trascrivi}
               onButta={butta}
               onApri={apri}
