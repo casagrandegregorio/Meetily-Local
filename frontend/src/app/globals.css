@@ -114,6 +114,18 @@
         --input: 0 0% 89.8%;
         --ring: 0 0% 3.9%;
         --radius: 0.5rem;
+        /* carbone e ambra: il colore scelto per la scheda al centro
+           (galleria 2, numero 1). #e8a33d su #221701. Sta solo qui e non
+           viene ridefinito in `.dark`, perche' l'ambra regge com'e' sia sul
+           chiaro sia sullo scuro. */
+        --ambra: 36 79% 57%;
+        --ambra-foreground: 40 94% 7%;
+        /* il foglio chiaro su cui si legge una trascrizione (galleria 10,
+           numero 1): carta #f6f4f0, testo #1c1b19, nomi e orari #8a837a.
+           E' carta anche nel tema scuro, per questo sta solo qui. */
+        --foglio: 40 25% 95%;
+        --foglio-foreground: 40 5% 10%;
+        --foglio-muted: 38 7% 51%;
         --chart-1: 12 76% 61%;
         --chart-2: 173 58% 39%;
         --chart-3: 197 37% 24%;

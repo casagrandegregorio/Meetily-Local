@@ -2,6 +2,13 @@
 
 import { Toaster } from "sonner";
 
+// Fuori da Tauri (cioe' nel browser, durante lo sviluppo) l'app morirebbe alla
+// prima chiamata di finestra: il finto la tiene in piedi. Dentro l'app vera non
+// fa niente. Vedi src/lib/tauri-finto.ts.
+import { installaTauriFinto } from "@/lib/tauri-finto";
+
+installaTauriFinto();
+
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RecordingStateProvider } from "@/contexts/RecordingStateContext";
 import { OllamaDownloadProvider } from "@/contexts/OllamaDownloadContext";

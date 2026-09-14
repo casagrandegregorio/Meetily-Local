@@ -61,6 +61,19 @@ export default {
           foreground: "hsl(var(--warning-foreground))",
           muted: "hsl(var(--warning-muted))",
         },
+        // L'ambra della scheda al centro. Unica tinta della schermata di
+        // registrazione: il tondo, la riga delle arretrate, i pulsanti
+        // TRASCRIVI.
+        ambra: {
+          DEFAULT: "hsl(var(--ambra))",
+          foreground: "hsl(var(--ambra-foreground))",
+        },
+        // Il foglio chiaro su cui si legge una trascrizione.
+        foglio: {
+          DEFAULT: "hsl(var(--foglio))",
+          foreground: "hsl(var(--foglio-foreground))",
+          muted: "hsl(var(--foglio-muted))",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

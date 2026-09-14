@@ -1,6 +1,8 @@
 "use client";
 
-import Sidebar from "@/components/Sidebar";
+// La barra dei tre posti prende il posto della `Sidebar` di Meetily, che resta
+// nel repo ma non viene piu' montata (galleria 8, numero 3).
+import { BarraPosti } from "@/components/barra-posti/BarraPosti";
 import { OnboardingFlow } from "@/components/onboarding";
 import { useOnboarding } from "@/contexts/OnboardingContext";
 
@@ -31,7 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-muted">
-      <Sidebar />
+      <BarraPosti />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </main>

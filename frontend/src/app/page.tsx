@@ -25,19 +25,24 @@ import { getErrorMessage } from "@/lib/utils";
 
 import { StatusOverlays } from "@/app/_components/StatusOverlays";
 import { SettingsModals } from "./_components/SettingsModal";
-import { TranscriptPanel } from "./_components/TranscriptPanel";
-import { RecordingHero } from "./_components/recording-page/RecordingHero";
-import { RecordingTopBar } from "./_components/recording-page/RecordingTopBar";
+// La scheda al centro nei suoi sei momenti prende il posto di `RecordingHero`
+// (la schermata ferma di Meetily) e di `RecordingTopBar` + `TranscriptPanel`
+// (il testo dal vivo mentre registra: qui non c'e', deciso da Greg). Restano
+// nel repo, non montati.
+import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
+import { useAudioLevels } from "@/hooks/useAudioLevels";
+import { useMomentoFinto } from "@/lib/momenti-finti";
+import type { Momento } from "@/types/momento";
 
 export default function Home() {
   const router = useRouter();
   const recordingState = useRecordingState();
-  const { transcriptModelConfig } = useConfig();
+  const { transcriptModelConfig, selectedDevices } = useConfig();
   const { setIsMeetingActive, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } =
     useModalState(transcriptModelConfig);
 
-  const { status, isStopping, isProcessing, isSaving } = recordingState;
+  const { status } = recordingState;
 
   // Page-local mirror of `isRecording`. The cross-cutting hook below keeps
   // this in sync with the global recording-state context (the "page only
@@ -207,12 +212,35 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isProcessingStop =
-    status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
-  const isFinalising =
-    status === RecordingStatus.PROCESSING_TRANSCRIPTS ||
-    status === RecordingStatus.SAVING ||
-    isSaving;
+
+  // Le barrette del livello mentre registra: l'apparecchio scelto, o quello di
+  // sistema. Fuori dalla registrazione il monitor sta spento.
+  const nomiDaAscoltare = isRecording
+    ? [selectedDevices?.micDevice ?? "default"]
+    : null;
+  const livelliAudio = useAudioLevels(nomiDaAscoltare);
+  const livelli = Array.from(livelliAudio.values()).map((l) => l.rms_level);
+
+  // Il momento della scheda, letto dallo stato vero. Il flusso di Meetily
+  // arriva a «ferma» e «registra»; dopo lo Stop passa da `useRecordingStop`,
+  // che oggi porta a `meeting-details`. I momenti dopo lo Stop — registrata,
+  // trascrive, pronta, muta — li accendera' l'idraulica.
+  const momentoVero: Momento = isRecording
+    ? { tipo: "registra", secondi: recordingState.recordingDuration }
+    : { tipo: "ferma" };
+
+  // Nel finto, `/?momento=pronta` mostra un momento a scelta, con dati veri:
+  // e' la galleria 5 dal vivo. Nell'app vera questa riga non fa niente.
+  const momentoChiesto = useMomentoFinto();
+  const momento = momentoChiesto ?? momentoVero;
+
+  // Le azioni della scheda che aspettano l'idraulica: per ora si limitano a
+  // dire in console cosa farebbero. «Butta» cancella l'audio: quando sara'
+  // collegata, vorra' una conferma.
+  const trascrivi = (folder: string) => console.info("[scheda] TRASCRIVI", folder);
+  const butta = (folder: string) => console.info("[scheda] BUTTA", folder);
+  const apri = (folder: string) =>
+    router.push(`/trascritte/leggi?folder=${encodeURIComponent(folder)}`);
 
   return (
     <Page>
@@ -229,43 +257,28 @@ export default function Home() {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <AnimatePresence mode="wait">
-          {!isRecording && !isFinalising ? (
-            <motion.div
-              key="hero"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.15 }}
-              className="flex min-h-0 flex-1 overflow-y-auto"
-            >
-              <RecordingHero
-                onStart={handleStartClick}
-                isStarting={isStarting || isRecordingDisabled}
-              />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="recording"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="flex min-h-0 flex-1 flex-col overflow-hidden"
-            >
-              {isRecording && (
-                <RecordingTopBar
-                  isStopping={isStopping}
-                  onStop={(callApi = true) => handleRecordingStop(callApi)}
-                  onStopInitiated={() => setIsStopping(true)}
-                />
-              )}
-              <TranscriptPanel
-                isProcessingStop={isProcessingStop}
-                isStopping={isStopping}
-                showModal={showModal}
-              />
-            </motion.div>
-          )}
+          <motion.div
+            key={momento.tipo}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.15 }}
+            className="flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto"
+          >
+            <SchedaRiunione
+              momento={momento}
+              livelli={livelli}
+              onStart={handleStartClick}
+              isStarting={isStarting || isRecordingDisabled}
+              onStop={() => {
+                setIsStopping(true);
+                void handleRecordingStop(true);
+              }}
+              onTrascrivi={trascrivi}
+              onButta={butta}
+              onApri={apri}
+            />
+          </motion.div>
         </AnimatePresence>
       </div>
 
