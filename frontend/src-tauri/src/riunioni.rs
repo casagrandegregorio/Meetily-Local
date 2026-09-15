@@ -470,6 +470,7 @@ pub async fn transcription_progress<R: Runtime>(
 // ---------------------------------------------------------------------------
 
 const RIASSUNTO: &str = "riassunto.md";
+const NOTE: &str = "note.md";
 
 /// Sposta la cartella di una riunione nel Cestino di Windows: non cancella,
 /// si recupera da li'. Rifiuta se su quella cartella sta girando una
@@ -513,34 +514,104 @@ pub async fn recording_audio_path<R: Runtime>(
     Ok(file.to_string_lossy().into_owned())
 }
 
-/// Il riassunto, `riassunto.md` com'e'; `None` se non e' mai stato fatto.
+/// I fogli scritti a mano accanto al testo: il riassunto (incollato da
+/// Claude) e le note di Greg. Solo questi due nomi: il frontend non sceglie
+/// file a piacere.
+fn nome_foglio(name: &str) -> Result<&'static str, String> {
+    match name {
+        "riassunto.md" => Ok(RIASSUNTO),
+        "note.md" => Ok(NOTE),
+        altro => Err(format!("Not a sheet: {:?}", altro)),
+    }
+}
+
+/// Un foglio com'e'; `None` se non c'e'.
 #[tauri::command]
-pub async fn read_summary<R: Runtime>(
+pub async fn read_sheet<R: Runtime>(
     app: AppHandle<R>,
     folder: String,
+    name: String,
 ) -> Result<Option<String>, String> {
     let radice = cartella_registrazioni(&app).await?;
-    let file = radice.join(nome_sicuro(&folder)?).join(RIASSUNTO);
+    let file = radice.join(nome_sicuro(&folder)?).join(nome_foglio(&name)?);
     if !file.is_file() {
         return Ok(None);
     }
     std::fs::read_to_string(&file)
         .map(Some)
-        .map_err(|e| format!("Cannot read {} in {:?}: {}", RIASSUNTO, folder, e))
+        .map_err(|e| format!("Cannot read {} in {:?}: {}", name, folder, e))
 }
 
-/// Scrive il riassunto accanto al testo: anche il riassunto lo ricorda il
-/// disco, non il database dell'app.
+/// Scrive un foglio accanto al testo: anche questi li ricorda il disco.
 #[tauri::command]
-pub async fn write_summary<R: Runtime>(
+pub async fn write_sheet<R: Runtime>(
     app: AppHandle<R>,
     folder: String,
+    name: String,
     text: String,
 ) -> Result<(), String> {
     let radice = cartella_registrazioni(&app).await?;
-    let file = radice.join(nome_sicuro(&folder)?).join(RIASSUNTO);
-    std::fs::write(&file, text)
-        .map_err(|e| format!("Cannot write {} in {:?}: {}", RIASSUNTO, folder, e))
+    let file = radice.join(nome_sicuro(&folder)?).join(nome_foglio(&name)?);
+    std::fs::write(&file, text).map_err(|e| format!("Cannot write {} in {:?}: {}", name, folder, e))
+}
+
+/// Un foglio nel Cestino di Windows (si recupera da li').
+#[tauri::command]
+pub async fn trash_sheet<R: Runtime>(
+    app: AppHandle<R>,
+    folder: String,
+    name: String,
+) -> Result<(), String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let file = radice.join(nome_sicuro(&folder)?).join(nome_foglio(&name)?);
+    if !file.is_file() {
+        return Ok(());
+    }
+    trash::delete(&file).map_err(|e| format!("Cannot trash {} in {:?}: {}", name, folder, e))
+}
+
+/// Il testo nel Cestino, l'audio resta: la riunione torna «da trascrivere»
+/// (15-09, Greg: «se elimino una trascritta torna in Da trascrivere; se la
+/// elimino anche li', va nel Cestino»). Vanno via i prodotti degli script
+/// e il riassunto, che era di quel testo; le note di Greg restano.
+#[tauri::command]
+pub async fn trash_transcript<R: Runtime>(
+    app: AppHandle<R>,
+    in_corso: tauri::State<'_, InCorso>,
+    folder: String,
+) -> Result<(), String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let dir = radice.join(nome_sicuro(&folder)?);
+    let vivo = in_corso
+        .0
+        .lock()
+        .map(|set| set.contains(&folder))
+        .unwrap_or(false);
+    if vivo {
+        return Err(format!("{:?} si sta trascrivendo: prima aspetta che finisca.", folder));
+    }
+    const PRODOTTI: [&str; 8] = [
+        TESTO,
+        "trascrizione.md.prima",
+        "testo.json",
+        "turni.json",
+        VOCI,
+        AVANZAMENTO,
+        REGISTRO,
+        RIASSUNTO,
+    ];
+    let da_buttare: Vec<PathBuf> = PRODOTTI
+        .iter()
+        .map(|n| dir.join(n))
+        .filter(|f| f.is_file())
+        .collect();
+    if da_buttare.is_empty() {
+        return Ok(());
+    }
+    trash::delete_all(&da_buttare)
+        .map_err(|e| format!("Cannot trash the transcript of {:?}: {}", folder, e))?;
+    log::info!("Testo nel Cestino: {:?} ({} file)", folder, da_buttare.len());
+    Ok(())
 }
 
 /// Una persona che gli script conoscono gia' (`memoria/voci-note.json`

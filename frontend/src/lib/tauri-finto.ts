@@ -105,7 +105,8 @@ const ARRETRATE_FINTE = [
 ];
 // le cartelle messe nel Cestino finto: spariscono dagli elenchi
 const cestinoFinto = new Set<string>();
-const riassuntiFinti = new Map<string, string>();
+const fogliFinti = new Map<string, string>();
+const testiButtati = new Set<string>();
 const oraLocale = (ms: number) => {
   const d = new Date(ms);
   const z = (n: number) => String(n).padStart(2, "0");
@@ -254,9 +255,14 @@ const risposteFinte: Record<string, unknown> = {
   // l'ha, anche se dentro sono parole inventate dal modello sul silenzio:
   // vedi la correzione del 09-09 in `hub/meeting-notes/DECISIONI.md`.
   list_pending_recordings: () =>
-    ARRETRATE_FINTE.filter(
-      (a) => trascrizioniFinte.get(a.folder)?.fase !== "fatto" && !cestinoFinto.has(a.folder),
-    ).map((a) => ({ ...a, esito: avanzamentoFinto({ folder: a.folder }) })),
+    [
+      ...ARRETRATE_FINTE,
+      ...TRASCRITTE_FINTE.filter((t) => testiButtati.has(t.folder)).map((t) => ({
+        folder: t.folder, minutes: t.minutes, silent: false, percento_voce: 94,
+      })),
+    ]
+      .filter((a) => trascrizioniFinte.get(a.folder)?.fase !== "fatto" && !cestinoFinto.has(a.folder))
+      .map((a) => ({ ...a, esito: avanzamentoFinto({ folder: a.folder }) })),
   trash_recording: ({ folder }: { folder?: string }) => {
     if (!folder) throw new Error("trash_recording: manca `folder`");
     cestinoFinto.add(folder);
@@ -269,7 +275,7 @@ const risposteFinte: Record<string, unknown> = {
   // `trascrivi/arretrate.md` (stato al 06-09). I nomi sono quelli di fantasia
   // gia' in uso nel progetto. L'ora viene dal nome della cartella.
   list_transcribed_recordings: () =>
-    TRASCRITTE_FINTE.filter((t) => !cestinoFinto.has(t.folder)),
+    TRASCRITTE_FINTE.filter((t) => !cestinoFinto.has(t.folder) && !testiButtati.has(t.folder)),
   // Il testo VERO di una riunione, letto dal disco. Il browser non puo'
   // aprire un file, quindi lo chiede a un servetto che serve la cartella
   // delle registrazioni (vedi il MANUALE, «la faccia nel browser»):
@@ -280,11 +286,23 @@ const risposteFinte: Record<string, unknown> = {
   // riunioni, e senza il servetto li offrirebbe a tutta la rete aziendale.
   // Niente entra nel repo: il testo resta sul disco, il servetto e' solo per
   // guardare la schermata. Dentro Tauri lo stesso comando lo fa Rust.
-  // `riassunto.md` nel finto vive in memoria: si incolla, si salva, si rilegge.
-  read_summary: ({ folder }: { folder?: string }) =>
-    (folder && riassuntiFinti.get(folder)) ?? null,
-  write_summary: ({ folder, text }: { folder?: string; text?: string }) => {
-    if (folder && text) riassuntiFinti.set(folder, text);
+  // i fogli scritti a mano (riassunto.md, note.md) nel finto vivono in
+  // memoria: si scrivono, si rileggono, si buttano
+  read_sheet: ({ folder, name }: { folder?: string; name?: string }) =>
+    fogliFinti.get(`${folder}/${name}`) ?? null,
+  write_sheet: ({ folder, name, text }: { folder?: string; name?: string; text?: string }) => {
+    if (folder && name && text) fogliFinti.set(`${folder}/${name}`, text);
+    return null;
+  },
+  trash_sheet: ({ folder, name }: { folder?: string; name?: string }) => {
+    fogliFinti.delete(`${folder}/${name}`);
+    return null;
+  },
+  // il testo nel Cestino: la riunione torna fra le arretrate (nel finto, in
+  // fondo all'elenco, 64 minuti come le altre)
+  trash_transcript: ({ folder }: { folder?: string }) => {
+    if (!folder) throw new Error("trash_transcript: manca `folder`");
+    testiButtati.add(folder);
     return null;
   },
   // l'audio da riascoltare: nel finto e' gia' un indirizzo (convertFileSrc

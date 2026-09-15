@@ -1,19 +1,18 @@
 "use client";
 
-// Impostazioni (galleria 15, numero 2, piu' il Calendario): cinque sezioni,
+// Impostazioni (galleria 15, numero 2, piu' il Calendario, meno il Riassunto
+// — tolto il 15-09 col modello locale): quattro sezioni,
 // solo le cose che sappiamo funzionare. Le sette di Meetily — General,
 // Recordings, Speakers, Transcription, Summary, Calendar, Beta — stanno in
 // `page-meetily.tsx.txt`, accanto, fuori dalla compilazione: la scelta del
 // modello Whisper, le Beta e le preferenze generali non servono piu' (la
 // trascrizione dal vivo e' spenta, il testo lo fanno i nostri script).
 //
-// Riassunto e Calendario sono i componenti di Meetily com'erano: il motore
-// del riassunto e' il suo, e il calendario «se funziona, e' carino».
-import { useEffect, useState } from "react";
-import { ArrowLeft, CalendarDays, Mic, SparkleIcon, Users, FileText } from "lucide-react";
+// Il Calendario e' il componente di Meetily com'era: «se funziona, e' carino».
+import { useState } from "react";
+import { ArrowLeft, CalendarDays, Mic, Users, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { SummaryModelSettings } from "@/components/SummaryModelSettings";
 import { CalendarSettings } from "@/components/CalendarSettings";
 import { Button } from "@/components/ui/button";
 import { Page, PageBody } from "@/components/layout/Page";
@@ -37,12 +36,6 @@ const SEZIONI: readonly SettingsCategory[] = [
     icon: FileText,
   },
   {
-    id: "riassunto",
-    label: "Riassunto",
-    description: "Il modello locale che riassume una riunione trascritta.",
-    icon: SparkleIcon,
-  },
-  {
     id: "persone",
     label: "Persone",
     description: "Le voci che gli script conoscono gia'.",
@@ -60,15 +53,12 @@ const PRIMA = SEZIONI[0].id;
 
 export default function Impostazioni() {
   const router = useRouter();
-  const [attiva, setAttiva] = useState<string>(PRIMA);
-
-  // `/settings#riassunto` apre direttamente quella sezione
-  useEffect(() => {
+  // `/settings#persone` apre direttamente quella sezione
+  const [attiva, setAttiva] = useState<string>(() => {
+    if (typeof window === "undefined") return PRIMA;
     const dalCancelletto = window.location.hash.replace(/^#/, "");
-    if (dalCancelletto && SEZIONI.some((s) => s.id === dalCancelletto)) {
-      setAttiva(dalCancelletto);
-    }
-  }, []);
+    return SEZIONI.some((s) => s.id === dalCancelletto) ? dalCancelletto : PRIMA;
+  });
 
   const scegli = (id: string) => {
     setAttiva(id);
@@ -94,7 +84,6 @@ export default function Impostazioni() {
             <SettingsSection title={sezione.label} description={sezione.description}>
               {sezione.id === "registrazione" && <ImpostazioniRegistrazione />}
               {sezione.id === "trascrizione" && <ImpostazioniTrascrizione />}
-              {sezione.id === "riassunto" && <SummaryModelSettings />}
               {sezione.id === "persone" && <ImpostazioniPersone />}
               {sezione.id === "calendario" && <CalendarSettings />}
             </SettingsSection>

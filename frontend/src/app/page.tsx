@@ -32,6 +32,7 @@ import { SettingsModals } from "./_components/SettingsModal";
 // nel repo, non montati.
 import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
 import { useAudioLevels } from "@/hooks/useAudioLevels";
+import { useBarrette } from "@/hooks/useBarrette";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
@@ -225,7 +226,7 @@ export default function Home() {
     ? [selectedDevices?.micDevice ?? "default"]
     : null;
   const livelliAudio = useAudioLevels(nomiDaAscoltare);
-  const livelli = Array.from(livelliAudio.values()).map((l) => l.rms_level);
+  const livelli = useBarrette(livelliAudio);
 
   // Il momento della scheda, letto dallo stato vero: ferma, registra, e dopo
   // lo Stop «registrata» finche' non si preme TRASCRIVI. Poi la scheda torna

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import type { AudioDevice } from "@/components/DeviceSelection";
 import type { RecordingPreferences } from "@/components/RecordingSettings";
 import { useAudioLevels } from "@/hooks/useAudioLevels";
+import { useBarrette } from "@/hooks/useBarrette";
 import { getErrorMessage } from "@/lib/utils";
 
 const PREDEFINITO = "";
@@ -114,10 +115,12 @@ export function ImpostazioniRegistrazione() {
   const ingressi = apparecchi.filter((d) => d.device_type === "Input" && d.name !== "default");
   const uscite = apparecchi.filter((d) => d.device_type === "Output" && d.name !== "default");
 
-  // il microfono che si ascolta nella prova: quello scelto, o il predefinito
-  const microfonoInUso = prefs?.preferred_mic_device ?? predefiniti[0] ?? "default";
+  // il microfono che si ascolta nella prova: quello scelto, oppure «default»,
+  // il nome che il monitor del backend risolve da solo (sulla scheda mentre
+  // registra si fa cosi'; il nome lungo di Windows il 15-09 non combaciava)
+  const microfonoInUso = prefs?.preferred_mic_device ?? "default";
   const livelli = useAudioLevels(provaMicrofono ? [microfonoInUso] : null);
-  const valori = Array.from(livelli.values()).map((l) => l.rms_level);
+  const valori = useBarrette(livelli);
 
   return (
     <div>

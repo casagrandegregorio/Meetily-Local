@@ -1,10 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
 
 import { Page, PageLoading } from "@/components/layout/Page";
 import { Spinner } from "@/components/ui/spinner";
@@ -13,8 +11,7 @@ import { useTrascritte } from "@/hooks/useTrascritte";
 import { orario, type Turno } from "@/types/trascrizione";
 import { useLettore } from "@/contexts/LettoreContext";
 import { LettoreFoglio } from "@/app/_components/lettore/Lettore";
-import { Markdown } from "@/app/_components/foglio/Markdown";
-import { getErrorMessage } from "@/lib/utils";
+import { Carta, Copia, FoglioScritto } from "@/app/_components/foglio/FoglioScritto";
 
 /** Ogni quanti secondi si mette un orario a margine del foglio. */
 const OGNI = 5 * 60;
@@ -58,59 +55,51 @@ function impagina(turni: Turno[]): Riga[] {
   });
 }
 
-function Foglio({ folder, turni }: { folder: string; turni: Turno[] }) {
+function Foglio({ folder, turni, testo }: { folder: string; turni: Turno[]; testo: string }) {
   const lettore = useLettore();
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background pt-6">
-      <article className="mx-auto w-175 max-w-full rounded-t-lg bg-foglio px-9 pt-7 pb-16 font-serif text-[16px] leading-[1.75] text-foglio-foreground">
-        {impagina(turni).map(({ turno, segno, stessoDiPrima }, i) => (
-          <div key={i} className={stessoDiPrima ? "mt-2" : "mt-4 first:mt-0"}>
-            {segno !== null && (
-              // l'orario a margine si clicca: l'audio salta li' (galleria 13)
-              <button
-                type="button"
-                onClick={() => void lettore.salta(folder, segno)}
-                title="Riascolta da qui"
-                className="font-sans text-[11px] text-foglio-muted underline decoration-dotted underline-offset-2 hover:text-ambra"
-              >
-                {orario(segno)}
-              </button>
-            )}
-            {!stessoDiPrima && (
-              <div className="font-sans text-[11px] font-semibold tracking-[.09em] text-foglio-muted uppercase">
-                {turno.who}
-              </div>
-            )}
-            <p className="m-0">{turno.text}</p>
-          </div>
-        ))}
-      </article>
-    </div>
+    <Carta>
+      <Copia testo={testo} nome="Testo" />
+      {impagina(turni).map(({ turno, segno, stessoDiPrima }, i) => (
+        <div key={i} className={stessoDiPrima ? "mt-2" : "mt-4 first:mt-0"}>
+          {segno !== null && (
+            // l'orario a margine si clicca: l'audio salta li' (galleria 13)
+            <button
+              type="button"
+              onClick={() => void lettore.salta(folder, segno)}
+              title="Riascolta da qui"
+              className="font-sans text-[11px] text-foglio-muted underline decoration-dotted underline-offset-2 hover:text-ambra"
+            >
+              {orario(segno)}
+            </button>
+          )}
+          {!stessoDiPrima && (
+            <div className="font-sans text-[11px] font-semibold tracking-[.09em] text-foglio-muted uppercase">
+              {turno.who}
+            </div>
+          )}
+          <p className="m-0">{turno.text}</p>
+        </div>
+      ))}
+    </Carta>
   );
 }
 
-/** Il foglio col riassunto sopra (galleria 14, numero 1: la linguetta Riassunto). */
-function FoglioRiassunto({ markdown }: { markdown: string }) {
-  return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background pt-6">
-      <article className="mx-auto w-175 max-w-full rounded-t-lg bg-foglio px-9 pt-7 pb-16 font-serif text-[16px] leading-[1.75] text-foglio-foreground">
-        <Markdown testo={markdown} />
-      </article>
-    </div>
-  );
-}
+type Linguetta = "testo" | "riassunto" | "note";
 
-type Linguetta = "testo" | "riassunto";
+const LINGUETTE: { id: Linguetta; nome: string }[] = [
+  { id: "testo", nome: "Testo" },
+  { id: "riassunto", nome: "Riassunto" },
+  { id: "note", nome: "Note" },
+];
 
 /**
- * Il riassunto (galleria 14, numero 1: due linguette in testa al foglio).
- *
- * Il 15-09 il motore locale di Meetily (gemma 1b sul processore) ha dato
- * riassunti in inglese, a pezzi, con tabelle rotte: Greg ha detto «meglio
- * toglierlo, lo do a Claude». Quindi: COPIA prende tutto il testo, lo si da'
- * a chi si vuole, e il riassunto che torna si incolla qui e resta sul disco
- * accanto al testo (`riassunto.md`, `write_summary`). Niente modello dentro
- * l'app.
+ * Il foglio di una riunione: tre linguette in testa (galleria 14, numero 1,
+ * piu' le Note chieste il 15-09). Testo e' la trascrizione; Riassunto e
+ * Note sono fogli scritti a mano — il riassunto lo fa Claude fuori dall'app
+ * (il modello locale di Meetily dava riassunti in inglese, a pezzi: tolto
+ * il 15-09), le note le scrive Greg — e restano sul disco accanto al testo.
+ * L'icona nell'angolo del foglio copia tutto.
  */
 function LeggiContenuto() {
   const router = useRouter();
@@ -118,56 +107,11 @@ function LeggiContenuto() {
   const { turni, testo, caricando, errore } = useTrascrizione(folder);
   const { trascritte } = useTrascritte();
   const scheda = trascritte.find((t) => t.folder === folder);
-
-  const [riassunto, setRiassunto] = useState<string | null>(null);
   const [linguetta, setLinguetta] = useState<Linguetta>("testo");
-  const [bozza, setBozza] = useState("");
-  const [salvando, setSalvando] = useState(false);
-
-  useEffect(() => {
-    if (!folder) return;
-    let annullato = false;
-    void invoke<string | null>("read_summary", { folder })
-      .then((r) => {
-        if (!annullato) setRiassunto(r);
-      })
-      .catch((e) => console.info("[foglio] riassunto non letto", e));
-    return () => {
-      annullato = true;
-    };
-  }, [folder]);
 
   if (!folder) {
     return <PageLoading>Nessuna riunione indicata.</PageLoading>;
   }
-
-  const copia = async (cosa: string, nome: string) => {
-    try {
-      await navigator.clipboard.writeText(cosa);
-      toast.success(`${nome} copiato`, { duration: 2000 });
-    } catch (e) {
-      toast.error("Non copiato", { description: getErrorMessage(e), duration: 6000 });
-    }
-  };
-
-  const salvaRiassunto = async () => {
-    const pulito = bozza.trim();
-    if (!pulito) return;
-    setSalvando(true);
-    try {
-      await invoke("write_summary", { folder, text: pulito });
-      setRiassunto(pulito);
-      setBozza("");
-      toast.success("Riassunto salvato accanto al testo", { duration: 3000 });
-    } catch (e) {
-      toast.error("Non salvato", { description: getErrorMessage(e), duration: 8000 });
-    } finally {
-      setSalvando(false);
-    }
-  };
-
-  const classeBottone =
-    "rounded-full border border-ambra px-3.5 py-1 text-xs font-semibold tracking-wide text-ambra hover:bg-ambra hover:text-ambra-foreground disabled:opacity-40";
 
   return (
     <Page>
@@ -188,39 +132,39 @@ function LeggiContenuto() {
           </p>
         )}
         <LettoreFoglio folder={folder} />
-        {/* le due linguette (galleria 14 -> 1) e COPIA di quello che si vede */}
         <div className="flex gap-0.5 rounded-full bg-muted p-0.75 text-xs">
-          {(["testo", "riassunto"] as const).map((l) => (
+          {LINGUETTE.map((l) => (
             <button
-              key={l}
+              key={l.id}
               type="button"
-              onClick={() => setLinguetta(l)}
+              onClick={() => setLinguetta(l.id)}
               className={`rounded-full px-3.5 py-1 ${
-                linguetta === l
+                linguetta === l.id
                   ? "bg-ambra font-semibold text-ambra-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {l === "testo" ? "Testo" : "Riassunto"}
+              {l.nome}
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() =>
-            void (linguetta === "testo"
-              ? copia(testo, "Testo")
-              : riassunto && copia(riassunto, "Riassunto"))
-          }
-          disabled={linguetta === "testo" ? !testo : !riassunto}
-          className={classeBottone}
-          title="Copia tutto, da incollare altrove"
-        >
-          COPIA
-        </button>
       </div>
 
-      {caricando ? (
+      {linguetta === "riassunto" ? (
+        <FoglioScritto
+          folder={folder}
+          nome="riassunto.md"
+          etichetta="Riassunto"
+          invito="Non c'e' ancora un riassunto. Copia il testo con l'icona nell'angolo, fallo riassumere a chi vuoi (Claude, per esempio) e incolla qui quello che torna: resta sul disco accanto al testo."
+        />
+      ) : linguetta === "note" ? (
+        <FoglioScritto
+          folder={folder}
+          nome="note.md"
+          etichetta="Note"
+          invito="Le tue note su questa riunione: restano sul disco accanto al testo."
+        />
+      ) : caricando ? (
         <PageLoading>
           <Spinner size="lg" />
         </PageLoading>
@@ -230,38 +174,8 @@ function LeggiContenuto() {
             {errore}
           </p>
         </PageLoading>
-      ) : linguetta === "riassunto" ? (
-        riassunto ? (
-          <FoglioRiassunto markdown={riassunto} />
-        ) : (
-          <div className="min-h-0 flex-1 overflow-auto bg-background pt-6">
-            <div className="mx-auto flex w-175 max-w-full flex-col gap-3 rounded-t-lg bg-foglio px-9 pt-7 pb-8 text-foglio-foreground">
-              <p className="font-sans text-sm text-foglio-muted">
-                Non c&apos;e&apos; ancora un riassunto. COPIA il testo, fallo riassumere a chi vuoi
-                (Claude, per esempio) e incolla qui quello che torna: resta sul disco accanto al
-                testo.
-              </p>
-              <textarea
-                value={bozza}
-                onChange={(e) => setBozza(e.target.value)}
-                placeholder="Incolla qui il riassunto"
-                rows={14}
-                spellCheck={false}
-                className="w-full resize-y rounded-md border border-foglio-muted/40 bg-transparent p-3 font-serif text-[15px] leading-relaxed outline-none focus:border-ambra"
-              />
-              <button
-                type="button"
-                onClick={() => void salvaRiassunto()}
-                disabled={salvando || bozza.trim() === ""}
-                className={`self-start ${classeBottone}`}
-              >
-                SALVA
-              </button>
-            </div>
-          </div>
-        )
       ) : (
-        <Foglio folder={folder} turni={turni} />
+        <Foglio folder={folder} turni={turni} testo={testo} />
       )}
     </Page>
   );

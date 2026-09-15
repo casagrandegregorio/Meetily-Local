@@ -12,7 +12,6 @@ import { chiCera, durata, giorno, type Trascritta } from "@/types/trascritta";
 import { LettoreRiga } from "@/app/_components/lettore/Lettore";
 import { useLavori } from "@/contexts/LavoriContext";
 import { getErrorMessage } from "@/lib/utils";
-import { COMANDO_CESTINO } from "@/types/arretrata";
 
 /** Il posto «Trascritte»: le riunioni che hanno gia' un testo, dalla piu' recente. */
 export default function Trascritte() {
@@ -22,12 +21,16 @@ export default function Trascritte() {
   // la riga che sta chiedendo «nel Cestino?»
   const [daConfermare, setDaConfermare] = useState<string | null>(null);
 
-  // Nel Cestino di Windows, testo e audio insieme: si recupera da li'.
+  // Il testo va nel Cestino di Windows, l'audio resta: la riunione torna in
+  // Da trascrivere, e da li' si butta tutto (15-09, due passi voluti da Greg).
   const cestino = (t: Trascritta) => {
     setDaConfermare(null);
-    invoke(COMANDO_CESTINO, { folder: t.folder })
+    invoke("trash_transcript", { folder: t.folder })
       .then(() => {
-        toast.success("Nel Cestino", { description: t.folder, duration: 4000 });
+        toast.success("Testo nel Cestino: la riunione torna in Da trascrivere", {
+          description: t.folder,
+          duration: 5000,
+        });
         segnala();
       })
       .catch((errore) =>
@@ -88,7 +91,7 @@ export default function Trascritte() {
                   className="flex shrink-0 items-center gap-2 text-xs"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span className="text-muted-foreground">nel Cestino?</span>
+                  <span className="text-muted-foreground">butto il testo?</span>
                   <button
                     type="button"
                     onClick={() => cestino(t)}
@@ -111,8 +114,8 @@ export default function Trascritte() {
                     e.stopPropagation();
                     setDaConfermare(t.folder);
                   }}
-                  aria-label="Nel Cestino"
-                  title="Nel Cestino di Windows (testo e audio)"
+                  aria-label="Testo nel Cestino"
+                  title="Butta il testo: la riunione torna in Da trascrivere"
                   className="shrink-0 rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
                 >
                   <Trash2 className="size-4" />
