@@ -918,7 +918,6 @@ pub fn run() {
             riunioni::recording_audio_path,
             riunioni::read_summary,
             riunioni::write_summary,
-            riunioni::ensure_meeting_for_folder,
             riunioni::list_known_voices,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,

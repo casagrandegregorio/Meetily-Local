@@ -106,18 +106,6 @@ const ARRETRATE_FINTE = [
 // le cartelle messe nel Cestino finto: spariscono dagli elenchi
 const cestinoFinto = new Set<string>();
 const riassuntiFinti = new Map<string, string>();
-const riassuntiInCorso = new Map<string, number>();
-const RIASSUNTO_DI_FORMA = `## Di cosa si e' parlato
-Un esempio di riassunto, per vedere la forma del foglio: **non** viene da una riunione vera.
-
-## Punti
-- Il primo punto discusso.
-- Il secondo punto, con una **decisione** presa.
-- Il terzo, rimandato alla prossima volta.
-
-## Da fare
-1. Greg: una cosa da fare.
-2. Marco: un'altra.`;
 const oraLocale = (ms: number) => {
   const d = new Date(ms);
   const z = (n: number) => String(n).padStart(2, "0");
@@ -167,6 +155,34 @@ function avanzamentoFinto({ folder }: { folder?: string }) {
     messaggio: null,
   };
 }
+
+const TRASCRITTE_FINTE = [
+    trascritta("Meeting 2026-09-04_09-02-34_2026-09-04_07-02", 94, 3, ["Greg", "Marco"]),
+    trascritta("Meeting 2026-09-03_09-22-44_2026-09-03_07-22", 24, 4, ["Stefano", "Marco", "Fabio"]),
+    trascritta("Meeting 2026-08-27_15-02-24_2026-08-27_13-02", 64, 1, []),
+    trascritta("Meeting 2026-08-26_10-03-33_2026-08-26_08-03", 37, 4, ["Marco"]),
+    trascritta("Meeting 2026-08-25_15-37-27_2026-08-25_13-37", 34, 3, ["Greg"]),
+    trascritta("Meeting 2026-08-14_15-12-20_2026-08-14_13-12", 45, 3, ["Greg"]),
+    trascritta("Meeting 2026-07-30_12-16-02_2026-07-30_10-16", 26, 2, ["Marco"]),
+    trascritta("Meeting 2026-07-30_10-06-15_2026-07-30_08-06", 105, 4, ["Marco"]),
+    trascritta("Meeting 2026-07-28_17-24-48_2026-07-28_15-24", 1, 2, []),
+    trascritta("Meeting 2026-07-28_17-02-58_2026-07-28_15-02", 2, 1, []),
+    trascritta("Meeting 2026-07-28_16-29-10_2026-07-28_14-29", 3, 5, []),
+    trascritta("Meeting 2026-07-14_14-39-40_2026-07-14_12-39", 88, 4, ["Marco"]),
+    trascritta("Meeting 2026-07-13_10-25-22_2026-07-13_08-25", 11, 5, ["Marco"]),
+    trascritta("Meeting 2026-07-13_10-16-15_2026-07-13_08-16", 8, 4, []),
+    trascritta("Meeting 2026-07-13_10-12-15_2026-07-13_08-12", 4, 3, []),
+    trascritta("Meeting 2026-07-13_10-05-53_2026-07-13_08-05", 3, 3, []),
+    trascritta("audio_2026-07-30_12-18", 26, 2, ["Marco"]),
+    trascritta("audio_2026-07-30_07-02", 1, 2, []),
+    trascritta("audio_2026-07-29_16-47", 1, 2, []),
+    trascritta("audio_2026-07-29_16-09", 1, 2, []),
+    trascritta("audio_2026-07-29_15-52", 1, 2, []),
+    trascritta("audio_2026-07-29_11-53", 1, 2, []),
+    trascritta("audio_2026-07-29_11-49", 1, 2, []),
+    trascritta("audio_2026-07-29_09-35", 1, 2, []),
+    trascritta("audio_2026-07-14_14-16", 88, 5, ["Marco"]),
+];
 
 // due riunioni finte, coi nomi di fantasia gia' in uso nel progetto
 const risposteFinte: Record<string, unknown> = {
@@ -252,33 +268,8 @@ const risposteFinte: Record<string, unknown> = {
   // `trascrivi/registrazioni.md`; voci e nomi riconosciuti da
   // `trascrivi/arretrate.md` (stato al 06-09). I nomi sono quelli di fantasia
   // gia' in uso nel progetto. L'ora viene dal nome della cartella.
-  list_transcribed_recordings: [
-    trascritta("Meeting 2026-09-04_09-02-34_2026-09-04_07-02", 94, 3, ["Greg", "Marco"]),
-    trascritta("Meeting 2026-09-03_09-22-44_2026-09-03_07-22", 24, 4, ["Stefano", "Marco", "Fabio"]),
-    trascritta("Meeting 2026-08-27_15-02-24_2026-08-27_13-02", 64, 1, []),
-    trascritta("Meeting 2026-08-26_10-03-33_2026-08-26_08-03", 37, 4, ["Marco"]),
-    trascritta("Meeting 2026-08-25_15-37-27_2026-08-25_13-37", 34, 3, ["Greg"]),
-    trascritta("Meeting 2026-08-14_15-12-20_2026-08-14_13-12", 45, 3, ["Greg"]),
-    trascritta("Meeting 2026-07-30_12-16-02_2026-07-30_10-16", 26, 2, ["Marco"]),
-    trascritta("Meeting 2026-07-30_10-06-15_2026-07-30_08-06", 105, 4, ["Marco"]),
-    trascritta("Meeting 2026-07-28_17-24-48_2026-07-28_15-24", 1, 2, []),
-    trascritta("Meeting 2026-07-28_17-02-58_2026-07-28_15-02", 2, 1, []),
-    trascritta("Meeting 2026-07-28_16-29-10_2026-07-28_14-29", 3, 5, []),
-    trascritta("Meeting 2026-07-14_14-39-40_2026-07-14_12-39", 88, 4, ["Marco"]),
-    trascritta("Meeting 2026-07-13_10-25-22_2026-07-13_08-25", 11, 5, ["Marco"]),
-    trascritta("Meeting 2026-07-13_10-16-15_2026-07-13_08-16", 8, 4, []),
-    trascritta("Meeting 2026-07-13_10-12-15_2026-07-13_08-12", 4, 3, []),
-    trascritta("Meeting 2026-07-13_10-05-53_2026-07-13_08-05", 3, 3, []),
-    trascritta("audio_2026-07-30_12-18", 26, 2, ["Marco"]),
-    trascritta("audio_2026-07-30_07-02", 1, 2, []),
-    trascritta("audio_2026-07-29_16-47", 1, 2, []),
-    trascritta("audio_2026-07-29_16-09", 1, 2, []),
-    trascritta("audio_2026-07-29_15-52", 1, 2, []),
-    trascritta("audio_2026-07-29_11-53", 1, 2, []),
-    trascritta("audio_2026-07-29_11-49", 1, 2, []),
-    trascritta("audio_2026-07-29_09-35", 1, 2, []),
-    trascritta("audio_2026-07-14_14-16", 88, 5, ["Marco"]),
-  ],
+  list_transcribed_recordings: () =>
+    TRASCRITTE_FINTE.filter((t) => !cestinoFinto.has(t.folder)),
   // Il testo VERO di una riunione, letto dal disco. Il browser non puo'
   // aprire un file, quindi lo chiede a un servetto che serve la cartella
   // delle registrazioni (vedi il MANUALE, «la faccia nel browser»):
@@ -289,28 +280,12 @@ const risposteFinte: Record<string, unknown> = {
   // riunioni, e senza il servetto li offrirebbe a tutta la rete aziendale.
   // Niente entra nel repo: il testo resta sul disco, il servetto e' solo per
   // guardare la schermata. Dentro Tauri lo stesso comando lo fa Rust.
-  // Il riassunto finto: il motore di Meetily nel finto non c'e'; qui il
-  // riassunto arriva dopo sei secondi ed e' un esempio di forma (non viene
-  // da nessuna riunione vera). `riassunto.md` nel finto vive in memoria.
+  // `riassunto.md` nel finto vive in memoria: si incolla, si salva, si rilegge.
   read_summary: ({ folder }: { folder?: string }) =>
     (folder && riassuntiFinti.get(folder)) ?? null,
   write_summary: ({ folder, text }: { folder?: string; text?: string }) => {
     if (folder && text) riassuntiFinti.set(folder, text);
     return null;
-  },
-  ensure_meeting_for_folder: ({ folder }: { folder?: string }) => folder ?? "",
-  builtin_ai_get_available_summary_model: "gemma3:1b",
-  api_process_transcript: ({ meetingId }: { meetingId?: string }) => {
-    if (meetingId) riassuntiInCorso.set(meetingId, Date.now());
-    return { message: "Summary generation started", process_id: meetingId };
-  },
-  api_get_summary: ({ meetingId }: { meetingId?: string }) => {
-    const dal = meetingId ? riassuntiInCorso.get(meetingId) : undefined;
-    if (!dal) return { status: "pending", meeting_id: meetingId, data: null, error: null };
-    if (Date.now() - dal < 6000) {
-      return { status: "processing", meeting_id: meetingId, data: null, error: null };
-    }
-    return { status: "completed", meeting_id: meetingId, data: { markdown: RIASSUNTO_DI_FORMA }, error: null };
   },
   // l'audio da riascoltare: nel finto e' gia' un indirizzo (convertFileSrc
   // finto lascia tutto com'e'), nell'app vera e' un percorso sul disco

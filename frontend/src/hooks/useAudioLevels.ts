@@ -33,11 +33,17 @@ export function useAudioLevels(
   // every re-render — only restart monitoring when the names actually change.
   const lastKey = useRef<string | null>(null);
 
+  // La chiave e' il contenuto, non l'array: un `[nome]` scritto nel render
+  // e' un array nuovo a ogni ridisegno, e con quello come dipendenza la
+  // pulizia toglieva l'ascoltatore al primo livello arrivato (15-09).
+  const key = deviceNames === null ? null : [...deviceNames].sort().join("|");
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    // i nomi si ricavano dalla chiave: e' lei la verita' di questo effetto
+    const deviceNames = key === null ? null : key.split("|").filter(Boolean);
 
-    const key = deviceNames === null ? null : [...deviceNames].sort().join("|");
     if (key === lastKey.current) return;
     lastKey.current = key;
 
@@ -85,7 +91,7 @@ export function useAudioLevels(
       // The cleanup-on-unmount case is handled by the parent component
       // dropping `deviceNames` to null before unmount.
     };
-  }, [deviceNames]);
+  }, [key]);
 
   // Stop monitoring on full unmount.
   useEffect(() => {

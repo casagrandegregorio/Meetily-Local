@@ -579,33 +579,3 @@ pub async fn list_known_voices<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Pers
     persone.sort_by(|a, b| b.riunioni.cmp(&a.riunioni).then_with(|| a.nome.cmp(&b.nome)));
     Ok(persone)
 }
-
-/// Il motore del riassunto di Meetily lavora per `meeting_id` e le sue
-/// tabelle puntano a `meetings(id)`: prima di chiedergli un riassunto, la
-/// riunione deve esistere li'. Qui l'id e' il nome della cartella, e la
-/// riga si crea una volta sola (`INSERT OR IGNORE`).
-#[tauri::command]
-pub async fn ensure_meeting_for_folder<R: Runtime>(
-    app: AppHandle<R>,
-    state: tauri::State<'_, crate::state::AppState>,
-    folder: String,
-) -> Result<String, String> {
-    let radice = cartella_registrazioni(&app).await?;
-    let dir = radice.join(nome_sicuro(&folder)?);
-    if !dir.join(AUDIO).is_file() {
-        return Err(format!("In {:?} non c'e' {}.", folder, AUDIO));
-    }
-    let adesso = Utc::now().to_rfc3339();
-    sqlx::query(
-        "INSERT OR IGNORE INTO meetings (id, title, created_at, updated_at, folder_path) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(&folder)
-    .bind(&folder)
-    .bind(&adesso)
-    .bind(&adesso)
-    .bind(dir.to_string_lossy().into_owned())
-    .execute(state.db_manager.pool())
-    .await
-    .map_err(|e| format!("Cannot create meeting row for {:?}: {}", folder, e))?;
-    Ok(folder)
-}

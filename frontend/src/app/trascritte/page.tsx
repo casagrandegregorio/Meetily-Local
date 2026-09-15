@@ -1,16 +1,39 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Trash2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
 import { useTrascritte } from "@/hooks/useTrascritte";
 import { chiCera, durata, giorno, type Trascritta } from "@/types/trascritta";
 import { LettoreRiga } from "@/app/_components/lettore/Lettore";
+import { useLavori } from "@/contexts/LavoriContext";
+import { getErrorMessage } from "@/lib/utils";
+import { COMANDO_CESTINO } from "@/types/arretrata";
 
 /** Il posto «Trascritte»: le riunioni che hanno gia' un testo, dalla piu' recente. */
 export default function Trascritte() {
   const router = useRouter();
   const { trascritte } = useTrascritte();
+  const { segnala } = useLavori();
+  // la riga che sta chiedendo «nel Cestino?»
+  const [daConfermare, setDaConfermare] = useState<string | null>(null);
+
+  // Nel Cestino di Windows, testo e audio insieme: si recupera da li'.
+  const cestino = (t: Trascritta) => {
+    setDaConfermare(null);
+    invoke(COMANDO_CESTINO, { folder: t.folder })
+      .then(() => {
+        toast.success("Nel Cestino", { description: t.folder, duration: 4000 });
+        segnala();
+      })
+      .catch((errore) =>
+        toast.error("Non ci sono riuscita", { description: getErrorMessage(errore), duration: 8000 }),
+      );
+  };
   const minutiTotali = trascritte.reduce((s, t) => s + t.minutes, 0);
   const oreTotali = (minutiTotali / 60).toLocaleString("it-IT", {
     maximumFractionDigits: 1,
@@ -60,6 +83,41 @@ export default function Trascritte() {
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 {durata(t.minutes)}
               </span>
+              {daConfermare === t.folder ? (
+                <span
+                  className="flex shrink-0 items-center gap-2 text-xs"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="text-muted-foreground">nel Cestino?</span>
+                  <button
+                    type="button"
+                    onClick={() => cestino(t)}
+                    className="rounded-full bg-destructive px-3 py-1 font-semibold text-destructive-foreground"
+                  >
+                    Sì
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDaConfermare(null)}
+                    className="rounded-full border border-border px-3 py-1 text-muted-foreground hover:text-foreground"
+                  >
+                    No
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDaConfermare(t.folder);
+                  }}
+                  aria-label="Nel Cestino"
+                  title="Nel Cestino di Windows (testo e audio)"
+                  className="shrink-0 rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
             </div>
           ))}
         </div>

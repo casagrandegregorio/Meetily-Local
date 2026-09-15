@@ -23,7 +23,17 @@ function inRiga(testo: string): ReactNode[] {
 type Blocco =
   | { tipo: "titolo"; livello: number; testo: string }
   | { tipo: "elenco"; numerato: boolean; voci: string[] }
+  | { tipo: "tabella"; righe: string[][] }
   | { tipo: "paragrafo"; testo: string };
+
+/** `| a | b |` → ["a", "b"]; una riga di soli trattini e' il separatore. */
+function cellette(riga: string): string[] | null {
+  const t = riga.trim();
+  if (!t.startsWith("|")) return null;
+  const celle = t.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  if (celle.every((c) => /^:?-{2,}:?$/.test(c))) return [];
+  return celle;
+}
 
 function aBlocchi(markdown: string): Blocco[] {
   const blocchi: Blocco[] = [];
@@ -39,8 +49,15 @@ function aBlocchi(markdown: string): Blocco[] {
     const titolo = riga.match(/^(#{1,4})\s+(.*)$/);
     const puntata = riga.match(/^\s*[-*•]\s+(.*)$/);
     const numerata = riga.match(/^\s*\d+[.)]\s+(.*)$/);
+    const celle = cellette(riga);
     if (riga.trim() === "") {
       chiudiParagrafo();
+    } else if (celle) {
+      chiudiParagrafo();
+      if (celle.length === 0) continue; // il separatore sotto l'intestazione
+      const ultimo = blocchi[blocchi.length - 1];
+      if (ultimo && ultimo.tipo === "tabella") ultimo.righe.push(celle);
+      else blocchi.push({ tipo: "tabella", righe: [celle] });
     } else if (titolo) {
       chiudiParagrafo();
       blocchi.push({ tipo: "titolo", livello: titolo[1].length, testo: titolo[2] });
@@ -95,6 +112,24 @@ export function Markdown({ testo }: { testo: string }) {
                   </li>
                 ))}
               </ul>
+            );
+          case "tabella":
+            return (
+              <div key={i} className="my-2 overflow-x-auto">
+                <table className="w-full border-collapse font-sans text-[13.5px]">
+                  <tbody>
+                    {b.righe.map((r, j) => (
+                      <tr key={j} className={j === 0 ? "font-semibold" : ""}>
+                        {r.map((c, k) => (
+                          <td key={k} className="border border-foglio-muted/40 px-2 py-1 align-top">
+                            {inRiga(c)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
           case "paragrafo":
             return (
