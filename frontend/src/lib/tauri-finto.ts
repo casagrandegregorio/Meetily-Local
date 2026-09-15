@@ -263,6 +263,12 @@ const risposteFinte: Record<string, unknown> = {
   // riunioni, e senza il servetto li offrirebbe a tutta la rete aziendale.
   // Niente entra nel repo: il testo resta sul disco, il servetto e' solo per
   // guardare la schermata. Dentro Tauri lo stesso comando lo fa Rust.
+  // l'audio da riascoltare: nel finto e' gia' un indirizzo (convertFileSrc
+  // finto lascia tutto com'e'), nell'app vera e' un percorso sul disco
+  recording_audio_path: ({ folder }: { folder?: string }) => {
+    if (!folder) throw new Error("recording_audio_path: manca `folder`");
+    return `http://127.0.0.1:3119/${encodeURIComponent(folder)}/audio.mp4`;
+  },
   read_transcript: async ({ folder }: { folder?: string }) => {
     if (!folder) throw new Error("read_transcript: manca `folder`");
     const via = `http://localhost:3119/${encodeURIComponent(folder)}/trascrizione.md`;

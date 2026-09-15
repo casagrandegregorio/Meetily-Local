@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Page } from "@/components/layout/Page";
 import { useTrascritte } from "@/hooks/useTrascritte";
 import { chiCera, durata, giorno, type Trascritta } from "@/types/trascritta";
+import { LettoreRiga } from "@/app/_components/lettore/Lettore";
 
 /** Il posto «Trascritte»: le riunioni che hanno gia' un testo, dalla piu' recente. */
 export default function Trascritte() {
@@ -36,13 +37,20 @@ export default function Trascritte() {
 
         <div className="min-h-0 flex-1 overflow-auto px-6">
           {trascritte.map((t) => (
-            <button
+            // la riga si apre col clic; il ▶ dentro ferma il clic e suona
+            // (galleria 13, numero 3)
+            <div
               key={t.folder}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => apri(t)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") apri(t);
+              }}
               title={t.folder}
-              className="flex w-full items-baseline gap-4 border-b border-border/60 py-3 text-left last:border-b-0 hover:bg-accent/40"
+              className="flex w-full cursor-pointer items-center gap-4 border-b border-border/60 py-3 text-left last:border-b-0 hover:bg-accent/40"
             >
+              <LettoreRiga folder={t.folder} />
               <span className="w-14 shrink-0 text-sm tabular-nums text-muted-foreground">
                 {giorno(t.recorded_at)}
               </span>
@@ -52,7 +60,7 @@ export default function Trascritte() {
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 {durata(t.minutes)}
               </span>
-            </button>
+            </div>
           ))}
         </div>
       </div>

@@ -23,6 +23,7 @@ import { SidebarProvider } from "@/components/Sidebar/SidebarProvider";
 // (deciso l'08-09). Resta nel repo; il nostro Stop e' `useFermaRegistrazione`.
 import { ImportDialogProvider } from "@/contexts/ImportDialogContext";
 import { LavoriProvider } from "@/contexts/LavoriContext";
+import { LettoreProvider } from "@/contexts/LettoreContext";
 
 import { TitleBar } from "@/components/TitleBar";
 // `TauriThemeSync` seguiva il tema di Windows e su un PC chiaro spegneva lo
@@ -48,6 +49,8 @@ const PROVIDERS = [
   ImportDialogProvider,
   // le trascrizioni in corso, viste da Registra, Da trascrivere e dalla barra
   LavoriProvider,
+  // il lettore dell'audio, uno solo per tutta l'app (galleria 13)
+  LettoreProvider,
 ];
 
 // Client side of the root layout: providers, bridges, dynamic UI. The

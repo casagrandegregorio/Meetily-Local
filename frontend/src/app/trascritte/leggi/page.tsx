@@ -9,6 +9,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { useTrascrizione } from "@/hooks/useTrascrizione";
 import { useTrascritte } from "@/hooks/useTrascritte";
 import { orario, type Turno } from "@/types/trascrizione";
+import { useLettore } from "@/contexts/LettoreContext";
+import { LettoreFoglio } from "@/app/_components/lettore/Lettore";
 
 /** Ogni quanti secondi si mette un orario a margine del foglio. */
 const OGNI = 5 * 60;
@@ -52,16 +54,23 @@ function impagina(turni: Turno[]): Riga[] {
   });
 }
 
-function Foglio({ turni }: { turni: Turno[] }) {
+function Foglio({ folder, turni }: { folder: string; turni: Turno[] }) {
+  const lettore = useLettore();
   return (
     <div className="min-h-0 flex-1 overflow-auto bg-background pt-6">
       <article className="mx-auto w-175 max-w-full rounded-t-lg bg-foglio px-9 pt-7 pb-16 font-serif text-[16px] leading-[1.75] text-foglio-foreground">
         {impagina(turni).map(({ turno, segno, stessoDiPrima }, i) => (
           <div key={i} className={stessoDiPrima ? "mt-2" : "mt-4 first:mt-0"}>
             {segno !== null && (
-              <div className="font-sans text-[11px] text-foglio-muted">
+              // l'orario a margine si clicca: l'audio salta li' (galleria 13)
+              <button
+                type="button"
+                onClick={() => void lettore.salta(folder, segno)}
+                title="Riascolta da qui"
+                className="font-sans text-[11px] text-foglio-muted underline decoration-dotted underline-offset-2 hover:text-ambra"
+              >
                 {orario(segno)}
-              </div>
+              </button>
             )}
             {!stessoDiPrima && (
               <div className="font-sans text-[11px] font-semibold tracking-[.09em] text-foglio-muted uppercase">
@@ -89,7 +98,7 @@ function LeggiContenuto() {
 
   return (
     <Page>
-      <div className="flex items-baseline gap-3 border-b border-border px-6 py-4">
+      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
         <button
           type="button"
           onClick={() => router.push("/trascritte")}
@@ -105,6 +114,7 @@ function LeggiContenuto() {
             {scheda.voices === 1 ? "voce" : "voci"}
           </p>
         )}
+        <LettoreFoglio folder={folder} />
       </div>
 
       {caricando ? (
@@ -118,7 +128,7 @@ function LeggiContenuto() {
           </p>
         </PageLoading>
       ) : (
-        <Foglio turni={turni} />
+        <Foglio folder={folder} turni={turni} />
       )}
     </Page>
   );
