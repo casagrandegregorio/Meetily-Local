@@ -33,6 +33,8 @@ import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
 import { useAudioLevels } from "@/hooks/useAudioLevels";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
+import { useLavori } from "@/contexts/LavoriContext";
+import { RigaLavoro } from "./_components/scheda/RigaLavoro";
 
 export default function Home() {
   const router = useRouter();
@@ -66,6 +68,8 @@ export default function Home() {
   // «registrata». `useRecordingStop` di Meetily (trascrizione, database,
   // salto a meeting-details) resta nel repo, non usato.
   const { registrata, ferma, scarta } = useFermaRegistrazione(setIsRecordingState);
+  // le trascrizioni in corso: la riga sottile sotto la scheda (galleria 12)
+  const { lavori, avvia, chiudi } = useLavori();
 
   // Recovery
   const {
@@ -222,9 +226,10 @@ export default function Home() {
   const livelli = Array.from(livelliAudio.values()).map((l) => l.rms_level);
 
   // Il momento della scheda, letto dallo stato vero: ferma, registra, e dopo
-  // lo Stop «registrata» finche' non si preme TRASCRIVI. I tre momenti dopo
-  // — trascrive, pronta, muta — li accendera' il comando che lancia la
-  // trascrizione, ancora da scrivere sul lato Rust.
+  // lo Stop «registrata» finche' non si preme TRASCRIVI. Poi la scheda torna
+  // «ferma» subito (galleria 12, numero 2): la trascrizione si segue nella
+  // riga sottile sotto, non sulla scheda. I momenti trascrive / pronta /
+  // muta della scheda restano per il finto (`/?momento=pronta`).
   const momentoVero: Momento = isRecording
     ? { tipo: "registra", secondi: recordingState.recordingDuration }
     : registrata
@@ -236,11 +241,15 @@ export default function Home() {
   const momentoChiesto = useMomentoFinto();
   const momento = momentoChiesto ?? momentoVero;
 
-  // Le due azioni che aspettano ancora il lato Rust: per ora dicono in console
-  // cosa farebbero e tolgono la scheda «registrata». «Butta» cancella
-  // l'audio: quando sara' collegata, vorra' una conferma.
+  // TRASCRIVI: lancia il lavoro e libera la scheda; se il backend dice di no
+  // (manca `uv`, o non sa dove sono gli script) lo dice in un avviso.
+  // «Butta» cancella l'audio: aspetta ancora il lato Rust, e vorra' una
+  // conferma.
   const trascrivi = (folder: string) => {
-    console.info("[scheda] TRASCRIVI", folder);
+    const minuti = momento.tipo === "registrata" ? momento.minutes : 0;
+    avvia(folder, minuti).catch((errore) =>
+      toast.error("Non parte", { description: getErrorMessage(errore), duration: 12000 }),
+    );
     scarta();
   };
   const butta = (folder: string) => {
@@ -273,16 +282,22 @@ export default function Home() {
             transition={{ duration: 0.15 }}
             className="flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto"
           >
-            <SchedaRiunione
-              momento={momento}
-              livelli={livelli}
-              onStart={handleStartClick}
-              isStarting={isStarting || isRecordingDisabled}
-              onStop={() => void ferma(recordingState.recordingDuration)}
-              onTrascrivi={trascrivi}
-              onButta={butta}
-              onApri={apri}
-            />
+            <div className="flex flex-col items-center gap-4">
+              <SchedaRiunione
+                momento={momento}
+                livelli={livelli}
+                onStart={handleStartClick}
+                isStarting={isStarting || isRecordingDisabled}
+                onStop={() => void ferma(recordingState.recordingDuration)}
+                onTrascrivi={trascrivi}
+                onButta={butta}
+                onApri={apri}
+              />
+              {/* le trascrizioni in corso, subito sotto la scheda (galleria 12) */}
+              {lavori.map((l) => (
+                <RigaLavoro key={l.folder} lavoro={l} onApri={apri} onChiudi={chiudi} />
+              ))}
+            </div>
           </motion.div>
         </AnimatePresence>
       </div>

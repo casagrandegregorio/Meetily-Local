@@ -5,6 +5,7 @@ import { Circle, Hourglass, List, Settings as SettingsIcon } from "lucide-react"
 
 import Info from "@/components/Info";
 import { useArretrate } from "@/hooks/useArretrate";
+import { finito, useLavori } from "@/contexts/LavoriContext";
 
 interface Posto {
   via: string;
@@ -34,12 +35,15 @@ export function BarraPosti() {
   const router = useRouter();
   const dove = usePathname();
   const { arretrate } = useArretrate();
+  // mentre si trascrive il pallino diventa blu e conta i lavori (galleria 12)
+  const inCorso = useLavori().lavori.filter((l) => !finito(l)).length;
 
   return (
     <nav className="flex w-18.5 shrink-0 flex-col items-center gap-1 border-r border-border bg-background py-3">
       {POSTI.map(({ via, nome, Icona }) => {
         const qui = dove === via;
-        const quante = via === "/da-trascrivere" ? arretrate.length : 0;
+        const quante = via === "/da-trascrivere" ? (inCorso || arretrate.length) : 0;
+        const blu = via === "/da-trascrivere" && inCorso > 0;
         return (
           <button
             key={via}
@@ -55,7 +59,7 @@ export function BarraPosti() {
             <span className="relative">
               <Icona className="size-4.25" />
               {quante > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 min-w-4 rounded-full bg-ambra px-1 text-center text-[9px] font-bold text-ambra-foreground">
+                <span className={`absolute -top-1.5 -right-2.5 min-w-4 rounded-full px-1 text-center text-[9px] font-bold ${blu ? "bg-info text-info-foreground" : "bg-ambra text-ambra-foreground"}`}>
                   {quante}
                 </span>
               )}

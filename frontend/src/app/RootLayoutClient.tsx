@@ -22,6 +22,7 @@ import { SidebarProvider } from "@/components/Sidebar/SidebarProvider";
 // Stop la registrazione resta «registrata» finche' non si preme TRASCRIVI
 // (deciso l'08-09). Resta nel repo; il nostro Stop e' `useFermaRegistrazione`.
 import { ImportDialogProvider } from "@/contexts/ImportDialogContext";
+import { LavoriProvider } from "@/contexts/LavoriContext";
 
 import { TitleBar } from "@/components/TitleBar";
 import { TauriThemeSync } from "@/components/TauriThemeSync";
@@ -43,6 +44,8 @@ const PROVIDERS = [
   SidebarProvider,
   TooltipProvider,
   ImportDialogProvider,
+  // le trascrizioni in corso, viste da Registra, Da trascrivere e dalla barra
+  LavoriProvider,
 ];
 
 // Client side of the root layout: providers, bridges, dynamic UI. The

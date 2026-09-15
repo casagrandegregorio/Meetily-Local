@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+import { useLavori } from "@/contexts/LavoriContext";
+
 import { COMANDO_TRASCRITTE, type Trascritta } from "@/types/trascritta";
 
 /**
@@ -27,9 +29,11 @@ export function useTrascritte() {
     }
   }, []);
 
+  // si ricarica anche quando finisce una trascrizione (`versione` cambia)
+  const { versione } = useLavori();
   useEffect(() => {
     void ricarica();
-  }, [ricarica]);
+  }, [ricarica, versione]);
 
   return { trascritte, caricando, ricarica };
 }

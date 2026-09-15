@@ -1,9 +1,14 @@
 "use client";
 
 import type { Arretrata } from "@/types/arretrata";
+import type { Lavoro } from "@/contexts/LavoriContext";
+
+import { Anellino, paroleLavoro, tintaLavoro } from "./RigaLavoro";
 
 interface PaginaArretrateProps {
   arretrate: Arretrata[];
+  /** le trascrizioni in corso: sulla loro riga, al posto del pulsante */
+  lavori?: Lavoro[];
   onTrascrivi: (arretrata: Arretrata) => void;
 }
 
@@ -24,7 +29,8 @@ function durata(minuti: number): string {
  * sera e' una pagina sua, perche' Greg ha chiesto di separare il registrare
  * dal guardare le registrazioni.
  */
-export function PaginaArretrate({ arretrate, onTrascrivi }: PaginaArretrateProps) {
+export function PaginaArretrate({ arretrate, lavori = [], onTrascrivi }: PaginaArretrateProps) {
+  const lavoroDi = (folder: string) => lavori.find((l) => l.folder === folder);
   const minutiTotali = arretrate.reduce((somma, a) => somma + a.minutes, 0);
   // 0,09 secondi di scheda grafica per ogni secondo di audio: la misura del
   // 06-09, con il modello grande su Intel Arc.
@@ -45,19 +51,22 @@ export function PaginaArretrate({ arretrate, onTrascrivi }: PaginaArretrateProps
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-6">
-        {arretrate.map((a) => (
+        {arretrate.map((a) => {
+          const lavoro = lavoroDi(a.folder);
+          const spenta = a.silent && !lavoro;
+          return (
           <div
             key={a.folder}
             className="flex items-center gap-3 border-b border-border/60 py-3 last:border-b-0"
           >
             <div
               className={`min-w-0 flex-1 truncate text-sm ${
-                a.silent ? "text-muted-foreground/60" : ""
+                spenta ? "text-muted-foreground/60" : ""
               }`}
               title={a.folder}
             >
               {a.folder}
-              {a.silent && (
+              {spenta && (
                 <span className="text-muted-foreground/60">
                   {" "}
                   · nessuna voce dentro
@@ -66,11 +75,17 @@ export function PaginaArretrate({ arretrate, onTrascrivi }: PaginaArretrateProps
             </div>
             <div
               className={`text-xs tabular-nums ${
-                a.silent ? "text-muted-foreground/60" : "text-muted-foreground"
+                spenta ? "text-muted-foreground/60" : "text-muted-foreground"
               }`}
             >
               {durata(a.minutes)}
             </div>
+            {lavoro ? (
+              <div className={`flex items-center gap-2 text-xs ${tintaLavoro(lavoro)}`}>
+                <Anellino lavoro={lavoro} />
+                <span>{paroleLavoro(lavoro)}</span>
+              </div>
+            ) : (
             <button
               type="button"
               onClick={() => onTrascrivi(a)}
@@ -82,8 +97,10 @@ export function PaginaArretrate({ arretrate, onTrascrivi }: PaginaArretrateProps
             >
               TRASCRIVI
             </button>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

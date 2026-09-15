@@ -81,6 +81,78 @@ function fermaRegistrazioneFinta() {
   return null;
 }
 
+// Le trascrizioni finte. Nell'app vera `start_transcription` lancia lo script
+// e `transcription_progress` legge `avanzamento.json`; qui le fasi passano da
+// sole, VENTI volte piu' veloci del vero (64 minuti di audio sarebbero 6
+// minuti di scheda grafica: qui 17 secondi). `iniziato_il` viene spostato
+// indietro dello stesso fattore, cosi' la stima dell'app (0,09 s per secondo
+// di audio, `minutiFatti`) vede la fase del testo avanzare come nel vero.
+// Le tre arretrate vere sono mute: la loro trascrizione finisce «muta»,
+// come farebbe lo script.
+const PIU_VELOCE = 20;
+const RAPPORTO = 0.09;
+interface TrascrizioneFinta {
+  fase: "avviata" | "testo" | "voci" | "fatto" | "muta";
+  dal: number; // ms, inizio della fase
+  totale: number; // minuti
+  timer?: ReturnType<typeof setTimeout>;
+}
+const trascrizioniFinte = new Map<string, TrascrizioneFinta>();
+const ARRETRATE_FINTE = [
+  { folder: "Meeting 2026-07-23_11-34-54_2026-07-23_09-34", minutes: 64, silent: true },
+  { folder: "audio_2026-07-23_10-43", minutes: 64, silent: true },
+  { folder: "audio_2026-07-23_10-41", minutes: 64, silent: true },
+];
+const oraLocale = (ms: number) => {
+  const d = new Date(ms);
+  const z = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+};
+
+function avviaTrascrizioneFinta({ folder }: { folder?: string }) {
+  if (!folder) throw new Error("start_transcription: manca `folder`");
+  const gia = trascrizioniFinte.get(folder);
+  if (gia && gia.fase !== "fatto" && gia.fase !== "muta") {
+    throw new Error(`"${folder}" si sta gia' trascrivendo.`);
+  }
+  const arretrata = ARRETRATE_FINTE.find((a) => a.folder === folder);
+  const totale = arretrata?.minutes ?? 12;
+  const t: TrascrizioneFinta = { fase: "avviata", dal: Date.now(), totale };
+  trascrizioniFinte.set(folder, t);
+  const passa = (fase: TrascrizioneFinta["fase"], dopoMs: number, poi?: () => void) => {
+    t.timer = setTimeout(() => {
+      t.fase = fase;
+      t.dal = Date.now();
+      poi?.();
+    }, dopoMs);
+  };
+  const fine = (fase: "fatto" | "muta") =>
+    passa(fase, fase === "muta" ? 1500 : 4000, () =>
+      emettiFinto("transcription-finished", { folder, ok: fase === "fatto" }),
+    );
+  if (arretrata?.silent) {
+    passa("avviata", 0, () => fine("muta"));
+  } else {
+    const msTesto = (totale * 60 * RAPPORTO * 1000) / PIU_VELOCE;
+    passa("testo", 1500, () => passa("voci", msTesto, () => fine("fatto")));
+  }
+  return null;
+}
+
+function avanzamentoFinto({ folder }: { folder?: string }) {
+  const t = folder ? trascrizioniFinte.get(folder) : undefined;
+  if (!t) return null;
+  const passatiVeri = (Date.now() - t.dal) * PIU_VELOCE;
+  return {
+    fase: t.fase,
+    totale_minuti: t.fase === "avviata" ? null : t.totale,
+    iniziato_il: oraLocale(Date.now() - passatiVeri),
+    aggiornato_il: oraLocale(t.dal),
+    percento_voce: t.fase === "muta" ? 1 : null,
+    messaggio: null,
+  };
+}
+
 // due riunioni finte, coi nomi di fantasia gia' in uso nel progetto
 const risposteFinte: Record<string, unknown> = {
   api_get_meetings: [
@@ -135,11 +207,10 @@ const risposteFinte: Record<string, unknown> = {
   // La quarta muta (27 agosto) NON e' qui perche' un `trascrizione.md` ce
   // l'ha, anche se dentro sono parole inventate dal modello sul silenzio:
   // vedi la correzione del 09-09 in `hub/meeting-notes/DECISIONI.md`.
-  list_pending_recordings: [
-    { folder: "Meeting 2026-07-23_11-34-54_2026-07-23_09-34", minutes: 64, silent: true },
-    { folder: "audio_2026-07-23_10-43", minutes: 64, silent: true },
-    { folder: "audio_2026-07-23_10-41", minutes: 64, silent: true },
-  ],
+  list_pending_recordings: () =>
+    ARRETRATE_FINTE.filter((a) => trascrizioniFinte.get(a.folder)?.fase !== "fatto"),
+  start_transcription: avviaTrascrizioneFinta,
+  transcription_progress: avanzamentoFinto,
   // Le 25 riunioni VERE con `trascrizione.md`, contate il 09-09. Durate da
   // `trascrivi/registrazioni.md`; voci e nomi riconosciuti da
   // `trascrivi/arretrate.md` (stato al 06-09). I nomi sono quelli di fantasia

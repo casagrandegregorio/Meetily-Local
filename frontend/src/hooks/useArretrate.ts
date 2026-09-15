@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+import { useLavori } from "@/contexts/LavoriContext";
+
 import { COMANDO_ARRETRATE, type Arretrata } from "@/types/arretrata";
 
 /**
@@ -29,9 +31,11 @@ export function useArretrate() {
     }
   }, []);
 
+  // si ricarica anche quando finisce una trascrizione (`versione` cambia)
+  const { versione } = useLavori();
   useEffect(() => {
     void ricarica();
-  }, [ricarica]);
+  }, [ricarica, versione]);
 
   return { arretrate, caricando, ricarica };
 }
