@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { minutiRestanti, type Momento } from "@/types/momento";
 import { durata } from "@/types/trascritta";
@@ -56,6 +56,41 @@ function Tondone({
     >
       {testo}
     </button>
+  );
+}
+
+/** «Butta la registrazione»: chiede conferma li' stesso, poi va nel Cestino. */
+function Butta({ folder, onButta }: { folder: string; onButta: (folder: string) => void }) {
+  const [chiede, setChiede] = useState(false);
+  if (!chiede) {
+    return (
+      <button
+        type="button"
+        onClick={() => setChiede(true)}
+        className="self-start text-sm text-ambra hover:underline"
+      >
+        Butta la registrazione
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-muted-foreground">Nel Cestino di Windows?</span>
+      <button
+        type="button"
+        onClick={() => onButta(folder)}
+        className="rounded-full bg-destructive px-3 py-0.5 text-xs font-semibold text-destructive-foreground"
+      >
+        Sì
+      </button>
+      <button
+        type="button"
+        onClick={() => setChiede(false)}
+        className="rounded-full border border-border px-3 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+      >
+        No
+      </button>
+    </div>
   );
 }
 
@@ -165,13 +200,7 @@ export function SchedaRiunione({
           <div className="truncate text-sm text-muted-foreground" title={momento.folder}>
             {momento.folder}
           </div>
-          <button
-            type="button"
-            onClick={() => onButta(momento.folder)}
-            className="self-start text-sm text-ambra hover:underline"
-          >
-            Butta la registrazione
-          </button>
+          <Butta folder={momento.folder} onButta={onButta} />
         </Scheda>
       );
 

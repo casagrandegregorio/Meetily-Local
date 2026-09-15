@@ -44,15 +44,10 @@ export function useRecordingStart(
   // Check if a local Whisper transcription model is downloaded and ready.
   // Function name kept as `checkParakeetReady` for minimal call-site churn —
   // it now reflects Whisper readiness.
-  const checkParakeetReady = useCallback(async (): Promise<boolean> => {
-    try {
-      const hasModels = await invoke<boolean>("whisper_has_available_models");
-      return hasModels;
-    } catch (error) {
-      console.error("Failed to check Whisper status:", error);
-      return false;
-    }
-  }, []);
+  // La trascrizione dal vivo e' spenta (15-09): il modello Whisper non serve
+  // per registrare, e questo controllo dice sempre si'. Il testo lo fanno i
+  // nostri script dopo, su richiesta.
+  const checkParakeetReady = useCallback(async (): Promise<boolean> => true, []);
 
   // Check if any Whisper model is currently downloading.
   const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {

@@ -34,6 +34,11 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
   // Nel contesto `null` vuol dire «quello di sistema», non «nessuno»: per
   // scrivere un nome sulla scheda serve comunque chiedere l'elenco.
   const [apparecchiVisti, setApparecchiVisti] = useState<AudioDevice[]>([]);
+  // I predefiniti di Windows: sono quelli che la registrazione usa davvero
+  // quando nelle impostazioni non c'e' una scelta. L'elenco non dice quale
+  // sia il predefinito, e mostrare il primo della lista sbagliava (15-09:
+  // sulla scheda c'era il monitor, non le cuffie).
+  const [predefiniti, setPredefiniti] = useState<[string | null, string | null]>([null, null]);
   useEffect(() => {
     let annullato = false;
     void (async () => {
@@ -42,6 +47,12 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
         if (!annullato) setApparecchiVisti(elenco);
       } catch (errore) {
         console.info("[scheda] apparecchi non leggibili", errore);
+      }
+      try {
+        const coppia = await invoke<[string | null, string | null]>("get_default_audio_devices");
+        if (!annullato && Array.isArray(coppia)) setPredefiniti(coppia);
+      } catch (errore) {
+        console.info("[scheda] predefiniti non leggibili", errore);
       }
     })();
     return () => {
@@ -58,8 +69,8 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
   const nomeCorto = (nome?: string | null) =>
     nome ? nome.split("(")[0].trim() : null;
   const apparecchi = [
-    nomeCorto(selectedDevices?.micDevice ?? primoDelTipo("Input")),
-    nomeCorto(selectedDevices?.systemDevice ?? primoDelTipo("Output")),
+    nomeCorto(selectedDevices?.micDevice ?? predefiniti[0] ?? primoDelTipo("Input")),
+    nomeCorto(selectedDevices?.systemDevice ?? predefiniti[1] ?? primoDelTipo("Output")),
   ].filter((n): n is string => Boolean(n));
 
   // L'ultima riunione con un testo, dallo stesso elenco di «Trascritte»: la

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
@@ -35,6 +36,7 @@ import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
 import { RigaLavoro } from "./_components/scheda/RigaLavoro";
+import { COMANDO_CESTINO } from "@/types/arretrata";
 
 export default function Home() {
   const router = useRouter();
@@ -69,7 +71,7 @@ export default function Home() {
   // salto a meeting-details) resta nel repo, non usato.
   const { registrata, ferma, scarta } = useFermaRegistrazione(setIsRecordingState);
   // le trascrizioni in corso: la riga sottile sotto la scheda (galleria 12)
-  const { lavori, avvia, chiudi } = useLavori();
+  const { lavori, avvia, chiudi, segnala } = useLavori();
 
   // Recovery
   const {
@@ -243,8 +245,8 @@ export default function Home() {
 
   // TRASCRIVI: lancia il lavoro e libera la scheda; se il backend dice di no
   // (manca `uv`, o non sa dove sono gli script) lo dice in un avviso.
-  // «Butta» cancella l'audio: aspetta ancora il lato Rust, e vorra' una
-  // conferma.
+  // «Butta» mette la cartella nel Cestino di Windows, dopo la conferma
+  // sulla scheda.
   const trascrivi = (folder: string) => {
     const minuti = momento.tipo === "registrata" ? momento.minutes : 0;
     avvia(folder, minuti).catch((errore) =>
@@ -253,7 +255,14 @@ export default function Home() {
     scarta();
   };
   const butta = (folder: string) => {
-    console.info("[scheda] BUTTA", folder);
+    invoke(COMANDO_CESTINO, { folder })
+      .then(() => {
+        toast.success("Nel Cestino", { description: folder, duration: 4000 });
+        segnala();
+      })
+      .catch((errore) =>
+        toast.error("Non ci sono riuscita", { description: getErrorMessage(errore), duration: 8000 }),
+      );
     scarta();
   };
   const apri = (folder: string) =>

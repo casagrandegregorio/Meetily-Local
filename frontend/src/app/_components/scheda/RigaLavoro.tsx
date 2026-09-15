@@ -63,11 +63,11 @@ export function paroleLavoro(lavoro: Lavoro): string {
     case "fatto":
       return "Pronta";
     case "muta":
-      return `Muta · voce nel ${s.percento_voce ?? 0} % del tempo, non si trascrive`;
+      return `Muta · voce al ${s.percento_voce ?? 0} %`;
     case "errore":
       return `Non ce l'ha fatta${s.messaggio ? ` · ${s.messaggio}` : ""}`;
     case "interrotta":
-      return "Interrotta: il programma non sta piu' girando";
+      return "Interrotta";
   }
 }
 

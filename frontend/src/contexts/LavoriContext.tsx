@@ -57,6 +57,8 @@ interface Lavori {
   chiudi: (folder: string) => void;
   /** cambia ogni volta che un lavoro finisce: gli elenchi si ricaricano */
   versione: number;
+  /** fa ricaricare gli elenchi: dopo il Cestino, per esempio */
+  segnala: () => void;
 }
 
 const Contesto = createContext<Lavori | null>(null);
@@ -109,6 +111,8 @@ export function LavoriProvider({ children }: { children: ReactNode }) {
     setLavori((prima) => prima.filter((l) => l.folder !== folder));
   }, []);
 
+  const segnala = useCallback(() => setVersione((v) => v + 1), []);
+
   // ogni due secondi, per i lavori ancora aperti
   useEffect(() => {
     const aperti = lavori.filter((l) => !finito(l));
@@ -136,8 +140,8 @@ export function LavoriProvider({ children }: { children: ReactNode }) {
   }, [aggiorna]);
 
   const valore = useMemo(
-    () => ({ lavori, avvia, chiudi, versione }),
-    [lavori, avvia, chiudi, versione],
+    () => ({ lavori, avvia, chiudi, versione, segnala }),
+    [lavori, avvia, chiudi, versione, segnala],
   );
   return <Contesto.Provider value={valore}>{children}</Contesto.Provider>;
 }

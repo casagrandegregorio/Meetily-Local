@@ -25,7 +25,9 @@ import { ImportDialogProvider } from "@/contexts/ImportDialogContext";
 import { LavoriProvider } from "@/contexts/LavoriContext";
 
 import { TitleBar } from "@/components/TitleBar";
-import { TauriThemeSync } from "@/components/TauriThemeSync";
+// `TauriThemeSync` seguiva il tema di Windows e su un PC chiaro spegneva lo
+// scuro: l'app e' scura sempre (gallerie 8 e 10, il foglio chiaro sta dentro
+// l'app scura). Il componente resta nel repo, non montato.
 import { ProviderStack } from "@/components/ProviderStack";
 import { AppShell } from "@/components/layout/AppShell";
 import { DownloadProgressToastProvider } from "@/components/shared/DownloadProgressToast";
@@ -58,7 +60,6 @@ export default function RootLayoutClient({
   return (
     <>
       {/* App-wide DOM/window concerns. Each does one thing. */}
-      <TauriThemeSync />
       <ProductionContextMenuBlocker />
 
       {/* TitleBar replaces native window decorations on every platform

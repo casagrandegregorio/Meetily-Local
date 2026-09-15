@@ -99,10 +99,12 @@ interface TrascrizioneFinta {
 }
 const trascrizioniFinte = new Map<string, TrascrizioneFinta>();
 const ARRETRATE_FINTE = [
-  { folder: "Meeting 2026-07-23_11-34-54_2026-07-23_09-34", minutes: 64, silent: true },
-  { folder: "audio_2026-07-23_10-43", minutes: 64, silent: true },
-  { folder: "audio_2026-07-23_10-41", minutes: 64, silent: true },
+  { folder: "Meeting 2026-07-23_11-34-54_2026-07-23_09-34", minutes: 64, silent: true, percento_voce: 0 },
+  { folder: "audio_2026-07-23_10-43", minutes: 64, silent: true, percento_voce: 0 },
+  { folder: "audio_2026-07-23_10-41", minutes: 64, silent: true, percento_voce: 0 },
 ];
+// le cartelle messe nel Cestino finto: spariscono dagli elenchi
+const cestinoFinto = new Set<string>();
 const oraLocale = (ms: number) => {
   const d = new Date(ms);
   const z = (n: number) => String(n).padStart(2, "0");
@@ -168,6 +170,8 @@ const risposteFinte: Record<string, unknown> = {
     { name: "Microphone Array (Intel Smart Sound)", device_type: "Input", is_default: true },
     { name: "Headphones (Bose QC)", device_type: "Output", is_default: true },
   ],
+  // i predefiniti di Windows, quelli che la registrazione usa davvero
+  get_default_audio_devices: ["Microphone Array (Intel Smart Sound)", "Headphones (Bose QC)"],
   // Servono scritti qui: la risposta di ripiego e' la lista vuota, e in
   // JavaScript `[]` vale VERO. Senza, l'app credeva di stare registrando e la
   // schermata ferma non si vedeva mai.
@@ -208,7 +212,14 @@ const risposteFinte: Record<string, unknown> = {
   // l'ha, anche se dentro sono parole inventate dal modello sul silenzio:
   // vedi la correzione del 09-09 in `hub/meeting-notes/DECISIONI.md`.
   list_pending_recordings: () =>
-    ARRETRATE_FINTE.filter((a) => trascrizioniFinte.get(a.folder)?.fase !== "fatto"),
+    ARRETRATE_FINTE.filter(
+      (a) => trascrizioniFinte.get(a.folder)?.fase !== "fatto" && !cestinoFinto.has(a.folder),
+    ).map((a) => ({ ...a, esito: avanzamentoFinto({ folder: a.folder }) })),
+  trash_recording: ({ folder }: { folder?: string }) => {
+    if (!folder) throw new Error("trash_recording: manca `folder`");
+    cestinoFinto.add(folder);
+    return null;
+  },
   start_transcription: avviaTrascrizioneFinta,
   transcription_progress: avanzamentoFinto,
   // Le 25 riunioni VERE con `trascrizione.md`, contate il 09-09. Durate da

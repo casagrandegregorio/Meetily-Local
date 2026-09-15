@@ -1,4 +1,5 @@
 // Una registrazione che sta sul disco ma non ha ancora un testo.
+import type { Avanzamento } from "./avanzamento";
 //
 // «Non trascritta» lo dice il disco, non l'archivio dell'app: se dentro la
 // cartella della riunione c'e' `trascrizione.md`, quella riunione e' pronta e
@@ -16,7 +17,17 @@ export interface Arretrata {
    * il lato Rust lo legge da li'.
    */
   silent: boolean | null;
+  /** quanto tempo, in percento, aveva voce dentro (da `livello.json`) */
+  percento_voce: number | null;
+  /**
+   * L'ultimo tentativo di trascrizione, com'e' in `avanzamento.json`: e' il
+   * disco a ricordare che una riunione e' uscita «muta», non la memoria
+   * dell'app (15-09: riaperta l'app, la riga tornava TRASCRIVI).
+   */
+  esito: Avanzamento | null;
 }
 
 /** Il comando Tauri che elenca le cartelle senza `trascrizione.md`. */
 export const COMANDO_ARRETRATE = "list_pending_recordings";
+/** Il comando Tauri che sposta una cartella nel Cestino di Windows. */
+export const COMANDO_CESTINO = "trash_recording";
