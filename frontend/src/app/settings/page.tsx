@@ -1,155 +1,102 @@
 "use client";
 
+// Impostazioni (galleria 15, numero 2, piu' il Calendario): cinque sezioni,
+// solo le cose che sappiamo funzionare. Le sette di Meetily — General,
+// Recordings, Speakers, Transcription, Summary, Calendar, Beta — stanno in
+// `page-meetily.tsx.txt`, accanto, fuori dalla compilazione: la scelta del
+// modello Whisper, le Beta e le preferenze generali non servono piu' (la
+// trascrizione dal vivo e' spenta, il testo lo fanno i nostri script).
+//
+// Riassunto e Calendario sono i componenti di Meetily com'erano: il motore
+// del riassunto e' il suo, e il calendario «se funziona, e' carino».
 import { useEffect, useState } from "react";
-import {
-  ArrowLeft,
-  CalendarDays,
-  Database as DatabaseIcon,
-  FlaskConical,
-  Mic,
-  Settings2,
-  SparkleIcon,
-  Users,
-} from "lucide-react";
+import { ArrowLeft, CalendarDays, Mic, SparkleIcon, Users, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { TranscriptSettings } from "@/components/TranscriptSettings";
-import { RecordingSettings } from "@/components/RecordingSettings";
-import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { SummaryModelSettings } from "@/components/SummaryModelSettings";
-import { BetaSettings } from "@/components/BetaSettings";
-import { SpeakerSettings } from "@/components/SpeakerSettings";
 import { CalendarSettings } from "@/components/CalendarSettings";
-import { useConfig } from "@/contexts/ConfigContext";
 import { Button } from "@/components/ui/button";
 import { Page, PageBody } from "@/components/layout/Page";
 
 import { SettingsSidebar, type SettingsCategory } from "./parts/SettingsSidebar";
 import { SettingsSection } from "./parts/SettingsSection";
+import { ImpostazioniRegistrazione } from "./parts/ImpostazioniRegistrazione";
+import { ImpostazioniPersone, ImpostazioniTrascrizione } from "./parts/ImpostazioniTrascrizione";
 
-const CATEGORIES: readonly SettingsCategory[] = [
+const SEZIONI: readonly SettingsCategory[] = [
   {
-    id: "general",
-    label: "General",
-    description: "Notifications, recording-folder location, and other defaults.",
-    icon: Settings2,
-  },
-  {
-    id: "recording",
-    label: "Recordings",
-    description: "Audio devices, capture format, and per-recording defaults.",
+    id: "registrazione",
+    label: "Registrazione",
+    description: "Da dove si prende l'audio, e dove finisce.",
     icon: Mic,
   },
   {
-    id: "speakers",
-    label: "Speakers",
-    description: "Saved voice profiles. Manage names, emails, and merges.",
-    icon: Users,
+    id: "trascrizione",
+    label: "Trascrizione",
+    description: "Gli script che fanno il testo e riconoscono chi parla.",
+    icon: FileText,
   },
   {
-    id: "transcription",
-    label: "Transcription",
-    description: "Whisper model selection and language preference.",
-    icon: DatabaseIcon,
-  },
-  {
-    id: "summary",
-    label: "Summary",
-    description: "AI engine + model that generates meeting summaries.",
+    id: "riassunto",
+    label: "Riassunto",
+    description: "Il modello locale che riassume una riunione trascritta.",
     icon: SparkleIcon,
   },
   {
-    id: "calendar",
-    label: "Calendar",
-    description: "Public ICS feeds. Link recordings to calendar events.",
-    icon: CalendarDays,
+    id: "persone",
+    label: "Persone",
+    description: "Le voci che gli script conoscono gia'.",
+    icon: Users,
   },
   {
-    id: "beta",
-    label: "Beta",
-    description: "Experimental features still under active development.",
-    icon: FlaskConical,
+    id: "calendario",
+    label: "Calendario",
+    description: "Un calendario (ICS) per dare un nome alle registrazioni.",
+    icon: CalendarDays,
   },
 ] as const;
 
-const DEFAULT_CATEGORY = CATEGORIES[0].id;
+const PRIMA = SEZIONI[0].id;
 
-function isKnownCategory(id: string): boolean {
-  return CATEGORIES.some((c) => c.id === id);
-}
-
-export default function SettingsPage() {
+export default function Impostazioni() {
   const router = useRouter();
-  const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const [attiva, setAttiva] = useState<string>(PRIMA);
 
-  const [activeId, setActiveId] = useState<string>(DEFAULT_CATEGORY);
-
-  // Sync the active category with `location.hash` on mount so links like
-  // `/settings#summary` deep-link to the right panel. We only push a new
-  // hash on user-driven changes — replaceState (not pushState) so the
-  // back button doesn't accumulate one history entry per category click.
+  // `/settings#riassunto` apre direttamente quella sezione
   useEffect(() => {
-    const fromHash = window.location.hash.replace(/^#/, "");
-    if (fromHash && isKnownCategory(fromHash)) {
-      setActiveId(fromHash);
+    const dalCancelletto = window.location.hash.replace(/^#/, "");
+    if (dalCancelletto && SEZIONI.some((s) => s.id === dalCancelletto)) {
+      setAttiva(dalCancelletto);
     }
   }, []);
 
-  const handleSelect = (id: string) => {
-    setActiveId(id);
-    if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `#${id}`);
-    }
+  const scegli = (id: string) => {
+    setAttiva(id);
+    window.history.replaceState(null, "", `#${id}`);
   };
 
-  // The ConfigContext already loads `transcriptModelConfig` on mount;
-  // the legacy version of this page duplicated that fetch here, which
-  // caused a brief content flash inside `<WhisperModelManager>` once
-  // the second fetch resolved with the same data but a new object
-  // reference (consumers re-rendered, the selected-model row briefly
-  // unhighlighted). Trust the context — it owns this lifecycle.
-
-  const active = CATEGORIES.find((c) => c.id === activeId) ?? CATEGORIES[0];
+  const sezione = SEZIONI.find((s) => s.id === attiva) ?? SEZIONI[0];
 
   return (
     <Page>
       <div className="flex shrink-0 items-center gap-3 border-b border-border bg-background px-6 py-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.back()}
-          className="gap-2"
-        >
+        <Button variant="ghost" size="sm" onClick={() => router.back()} className="gap-2">
           <ArrowLeft className="size-4" />
-          <span>Back</span>
+          <span>Indietro</span>
         </Button>
-        <h1 className="text-lg font-semibold">Settings</h1>
+        <h1 className="text-lg font-semibold">Impostazioni</h1>
       </div>
 
       <PageBody>
         <div className="flex h-full min-h-0 flex-1 overflow-hidden bg-background">
-          <SettingsSidebar
-            categories={CATEGORIES}
-            activeId={activeId}
-            onSelect={handleSelect}
-          />
+          <SettingsSidebar categories={SEZIONI} activeId={attiva} onSelect={scegli} />
           <main className="min-w-0 flex-1">
-            <SettingsSection
-              title={active.label}
-              description={active.description}
-            >
-              {active.id === "general" && <PreferenceSettings />}
-              {active.id === "recording" && <RecordingSettings />}
-              {active.id === "speakers" && <SpeakerSettings />}
-              {active.id === "transcription" && (
-                <TranscriptSettings
-                  transcriptModelConfig={transcriptModelConfig}
-                  setTranscriptModelConfig={setTranscriptModelConfig}
-                />
-              )}
-              {active.id === "summary" && <SummaryModelSettings />}
-              {active.id === "calendar" && <CalendarSettings />}
-              {active.id === "beta" && <BetaSettings />}
+            <SettingsSection title={sezione.label} description={sezione.description}>
+              {sezione.id === "registrazione" && <ImpostazioniRegistrazione />}
+              {sezione.id === "trascrizione" && <ImpostazioniTrascrizione />}
+              {sezione.id === "riassunto" && <SummaryModelSettings />}
+              {sezione.id === "persone" && <ImpostazioniPersone />}
+              {sezione.id === "calendario" && <CalendarSettings />}
             </SettingsSection>
           </main>
         </div>

@@ -291,6 +291,19 @@ async fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
         .map_err(|e| format!("Failed to list audio devices: {}", e))
 }
 
+/// I due apparecchi che la registrazione usera' se nessuno ne ha scelto uno
+/// nelle impostazioni: il microfono e l'uscita predefiniti di Windows, gli
+/// stessi che prende `start_recording` (`default_input_device` /
+/// `default_output_device`). La scheda «Pronta a registrare» mostra questi:
+/// l'elenco di `get_audio_devices` non dice quale sia il predefinito.
+#[tauri::command]
+async fn get_default_audio_devices() -> Result<(Option<String>, Option<String>), String> {
+    Ok((
+        audio::default_input_device().ok().map(|d| d.name),
+        audio::default_output_device().ok().map(|d| d.name),
+    ))
+}
+
 #[tauri::command]
 async fn trigger_microphone_permission() -> Result<bool, String> {
     trigger_audio_permission()
@@ -816,6 +829,7 @@ pub fn run() {
             whisper_engine::parallel_commands::prepare_audio_chunks,
             whisper_engine::parallel_commands::test_parallel_processing_setup,
             get_audio_devices,
+            get_default_audio_devices,
             trigger_microphone_permission,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
@@ -900,6 +914,12 @@ pub fn run() {
             riunioni::transcription_progress,
             riunioni::get_transcriber_folder,
             riunioni::set_transcriber_folder,
+            riunioni::trash_recording,
+            riunioni::recording_audio_path,
+            riunioni::read_summary,
+            riunioni::write_summary,
+            riunioni::ensure_meeting_for_folder,
+            riunioni::list_known_voices,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,

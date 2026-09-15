@@ -40,6 +40,12 @@ pub struct Arretrata {
     /// `true` se dentro non c'e' praticamente voce, `null` se nessuno ha
     /// ancora misurato (lo scrive `livello.json`, quando c'e').
     pub silent: Option<bool>,
+    /// quanto tempo, in percento, aveva voce dentro (da `livello.json`)
+    pub percento_voce: Option<u32>,
+    /// l'ultimo tentativo di trascrizione, com'e' in `avanzamento.json`:
+    /// e' il disco a ricordare che una riunione e' uscita «muta», non la
+    /// memoria dell'app (15-09: riaperta l'app, la riga tornava TRASCRIVI)
+    pub esito: Option<Avanzamento>,
 }
 
 /// Una riunione con il suo testo.
@@ -74,6 +80,8 @@ struct Voci {
 #[derive(Deserialize)]
 struct Livello {
     muta: bool,
+    #[serde(default)]
+    percento_voce: Option<u32>,
 }
 
 fn leggi_json<T: for<'de> Deserialize<'de>>(percorso: &Path) -> Option<T> {
@@ -153,17 +161,28 @@ fn nome_sicuro(folder: &str) -> Result<&str, String> {
 #[tauri::command]
 pub async fn list_pending_recordings<R: Runtime>(
     app: AppHandle<R>,
+    in_corso: tauri::State<'_, InCorso>,
 ) -> Result<Vec<Arretrata>, String> {
     let radice = cartella_registrazioni(&app).await?;
+    let vivi: HashSet<String> = in_corso
+        .0
+        .lock()
+        .map(|set| set.clone())
+        .unwrap_or_default();
     let elenco = cartelle_con_audio(&radice)?
         .into_iter()
         .filter(|dir| !dir.join(TESTO).is_file())
         .map(|dir| {
             let meta = leggi_json::<Metadata>(&dir.join(METADATA)).unwrap_or_default();
+            let livello = leggi_json::<Livello>(&dir.join(LIVELLO));
+            let folder = nome(&dir);
+            let esito = esito_su_disco(&dir, vivi.contains(&folder));
             Arretrata {
-                folder: nome(&dir),
+                folder,
                 minutes: minuti(&meta),
-                silent: leggi_json::<Livello>(&dir.join(LIVELLO)).map(|l| l.muta),
+                silent: livello.as_ref().map(|l| l.muta),
+                percento_voce: livello.and_then(|l| l.percento_voce),
+                esito,
             }
         })
         .collect();
@@ -417,9 +436,19 @@ pub async fn start_transcription<R: Runtime>(
     Ok(())
 }
 
-/// A che punto e' una cartella: quello che c'e' in `avanzamento.json`,
-/// `null` se non c'e'. Se il file dice «in corso» ma nessun programma sta
-/// girando su quella cartella, la fase diventa `interrotta`.
+/// Quello che c'e' in `avanzamento.json`, `None` se non c'e'. Se il file
+/// dice «in corso» ma nessun programma sta girando su quella cartella, la
+/// fase diventa `interrotta`.
+fn esito_su_disco(dir: &Path, vivo: bool) -> Option<Avanzamento> {
+    let mut stato = leggi_json::<Avanzamento>(&dir.join(AVANZAMENTO))?;
+    let in_lavoro = matches!(stato.fase.as_str(), "avviata" | "testo" | "voci");
+    if in_lavoro && !vivo {
+        stato.fase = "interrotta".into();
+    }
+    Some(stato)
+}
+
+/// A che punto e' una cartella: vedi `esito_su_disco`.
 #[tauri::command]
 pub async fn transcription_progress<R: Runtime>(
     app: AppHandle<R>,
@@ -428,19 +457,155 @@ pub async fn transcription_progress<R: Runtime>(
 ) -> Result<Option<Avanzamento>, String> {
     let radice = cartella_registrazioni(&app).await?;
     let dir = radice.join(nome_sicuro(&folder)?);
-    let Some(mut stato) = leggi_json::<Avanzamento>(&dir.join(AVANZAMENTO)) else {
-        return Ok(None);
-    };
-    let in_lavoro = matches!(stato.fase.as_str(), "avviata" | "testo" | "voci");
-    if in_lavoro {
-        let vivo = in_corso
-            .0
-            .lock()
-            .map(|set| set.contains(&folder))
-            .unwrap_or(false);
-        if !vivo {
-            stato.fase = "interrotta".into();
-        }
+    let vivo = in_corso
+        .0
+        .lock()
+        .map(|set| set.contains(&folder))
+        .unwrap_or(false);
+    Ok(esito_su_disco(&dir, vivo))
+}
+
+// ---------------------------------------------------------------------------
+// Il Cestino, l'audio da riascoltare, il riassunto.
+// ---------------------------------------------------------------------------
+
+const RIASSUNTO: &str = "riassunto.md";
+
+/// Sposta la cartella di una riunione nel Cestino di Windows: non cancella,
+/// si recupera da li'. Rifiuta se su quella cartella sta girando una
+/// trascrizione.
+#[tauri::command]
+pub async fn trash_recording<R: Runtime>(
+    app: AppHandle<R>,
+    in_corso: tauri::State<'_, InCorso>,
+    folder: String,
+) -> Result<(), String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let dir = radice.join(nome_sicuro(&folder)?);
+    if !dir.is_dir() {
+        return Err(format!("{:?} non c'e'.", folder));
     }
-    Ok(Some(stato))
+    let vivo = in_corso
+        .0
+        .lock()
+        .map(|set| set.contains(&folder))
+        .unwrap_or(false);
+    if vivo {
+        return Err(format!("{:?} si sta trascrivendo: prima aspetta che finisca.", folder));
+    }
+    trash::delete(&dir).map_err(|e| format!("Non sono riuscito a mettere {:?} nel Cestino: {}", folder, e))?;
+    log::info!("Nel Cestino: {:?}", dir);
+    Ok(())
+}
+
+/// Il percorso assoluto di `audio.mp4`: il frontend lo passa a
+/// `convertFileSrc` e lo suona con un `<audio>` (il lettore, galleria 13).
+#[tauri::command]
+pub async fn recording_audio_path<R: Runtime>(
+    app: AppHandle<R>,
+    folder: String,
+) -> Result<String, String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let file = radice.join(nome_sicuro(&folder)?).join(AUDIO);
+    if !file.is_file() {
+        return Err(format!("In {:?} non c'e' {}.", folder, AUDIO));
+    }
+    Ok(file.to_string_lossy().into_owned())
+}
+
+/// Il riassunto, `riassunto.md` com'e'; `None` se non e' mai stato fatto.
+#[tauri::command]
+pub async fn read_summary<R: Runtime>(
+    app: AppHandle<R>,
+    folder: String,
+) -> Result<Option<String>, String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let file = radice.join(nome_sicuro(&folder)?).join(RIASSUNTO);
+    if !file.is_file() {
+        return Ok(None);
+    }
+    std::fs::read_to_string(&file)
+        .map(Some)
+        .map_err(|e| format!("Cannot read {} in {:?}: {}", RIASSUNTO, folder, e))
+}
+
+/// Scrive il riassunto accanto al testo: anche il riassunto lo ricorda il
+/// disco, non il database dell'app.
+#[tauri::command]
+pub async fn write_summary<R: Runtime>(
+    app: AppHandle<R>,
+    folder: String,
+    text: String,
+) -> Result<(), String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let file = radice.join(nome_sicuro(&folder)?).join(RIASSUNTO);
+    std::fs::write(&file, text)
+        .map_err(|e| format!("Cannot write {} in {:?}: {}", RIASSUNTO, folder, e))
+}
+
+/// Una persona che gli script conoscono gia' (`memoria/voci-note.json`
+/// nella cartella degli script): il nome e in quante riunioni e' stata
+/// riconosciuta. Solo lettura: i nomi si danno con `battesimo.py`. Il file
+/// con i nomi veri (`chiavi-nomi.json`) qui non si legge mai.
+#[derive(Serialize)]
+pub struct Persona {
+    pub nome: String,
+    pub riunioni: u32,
+}
+
+#[derive(Deserialize)]
+struct VociNote {
+    #[serde(default)]
+    persone: std::collections::HashMap<String, PersonaNota>,
+}
+
+#[derive(Deserialize)]
+struct PersonaNota {
+    #[serde(default)]
+    riunioni: u32,
+}
+
+#[tauri::command]
+pub async fn list_known_voices<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Persona>, String> {
+    let script_dir = cartella_script(&app)?;
+    let Some(note) = leggi_json::<VociNote>(&script_dir.join("memoria").join("voci-note.json")) else {
+        return Ok(Vec::new());
+    };
+    let mut persone: Vec<Persona> = note
+        .persone
+        .into_iter()
+        .map(|(nome, p)| Persona { nome, riunioni: p.riunioni })
+        .collect();
+    persone.sort_by(|a, b| b.riunioni.cmp(&a.riunioni).then_with(|| a.nome.cmp(&b.nome)));
+    Ok(persone)
+}
+
+/// Il motore del riassunto di Meetily lavora per `meeting_id` e le sue
+/// tabelle puntano a `meetings(id)`: prima di chiedergli un riassunto, la
+/// riunione deve esistere li'. Qui l'id e' il nome della cartella, e la
+/// riga si crea una volta sola (`INSERT OR IGNORE`).
+#[tauri::command]
+pub async fn ensure_meeting_for_folder<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, crate::state::AppState>,
+    folder: String,
+) -> Result<String, String> {
+    let radice = cartella_registrazioni(&app).await?;
+    let dir = radice.join(nome_sicuro(&folder)?);
+    if !dir.join(AUDIO).is_file() {
+        return Err(format!("In {:?} non c'e' {}.", folder, AUDIO));
+    }
+    let adesso = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT OR IGNORE INTO meetings (id, title, created_at, updated_at, folder_path) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&folder)
+    .bind(&folder)
+    .bind(&adesso)
+    .bind(&adesso)
+    .bind(dir.to_string_lossy().into_owned())
+    .execute(state.db_manager.pool())
+    .await
+    .map_err(|e| format!("Cannot create meeting row for {:?}: {}", folder, e))?;
+    Ok(folder)
 }

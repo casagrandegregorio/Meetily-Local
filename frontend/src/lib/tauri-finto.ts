@@ -105,6 +105,19 @@ const ARRETRATE_FINTE = [
 ];
 // le cartelle messe nel Cestino finto: spariscono dagli elenchi
 const cestinoFinto = new Set<string>();
+const riassuntiFinti = new Map<string, string>();
+const riassuntiInCorso = new Map<string, number>();
+const RIASSUNTO_DI_FORMA = `## Di cosa si e' parlato
+Un esempio di riassunto, per vedere la forma del foglio: **non** viene da una riunione vera.
+
+## Punti
+- Il primo punto discusso.
+- Il secondo punto, con una **decisione** presa.
+- Il terzo, rimandato alla prossima volta.
+
+## Da fare
+1. Greg: una cosa da fare.
+2. Marco: un'altra.`;
 const oraLocale = (ms: number) => {
   const d = new Date(ms);
   const z = (n: number) => String(n).padStart(2, "0");
@@ -172,6 +185,20 @@ const risposteFinte: Record<string, unknown> = {
   ],
   // i predefiniti di Windows, quelli che la registrazione usa davvero
   get_default_audio_devices: ["Microphone Array (Intel Smart Sound)", "Headphones (Bose QC)"],
+  get_recording_preferences: {
+    save_folder: "C:\\Users\\gcasagrande\\Music\\meetily-recordings",
+    auto_save: true, file_format: "mp4", preferred_mic_device: null, preferred_system_device: null,
+  },
+  set_recording_preferences: null,
+  get_transcriber_folder: "C:\\Users\\gcasagrande\\.claude\\hub\\meeting-notes\\trascrivi",
+  set_transcriber_folder: null,
+  // le persone che gli script conoscono (memoria/voci-note.json, contate il
+  // 15-09): i nomi di fantasia gia' in uso nel progetto
+  list_known_voices: [
+    { nome: "Greg", riunioni: 3 }, { nome: "Marco", riunioni: 3 }, { nome: "Dario", riunioni: 1 },
+    { nome: "Elena", riunioni: 1 }, { nome: "Fabio", riunioni: 1 }, { nome: "Paolo", riunioni: 1 },
+    { nome: "Stefano", riunioni: 1 },
+  ],
   // Servono scritti qui: la risposta di ripiego e' la lista vuota, e in
   // JavaScript `[]` vale VERO. Senza, l'app credeva di stare registrando e la
   // schermata ferma non si vedeva mai.
@@ -202,7 +229,6 @@ const risposteFinte: Record<string, unknown> = {
   },
   is_onboarding_completed: true,
   api_get_api_key: null,
-  api_get_summary: null,
   // Le registrazioni che stanno sul disco senza `trascrizione.md`. Sono le TRE
   // vere, ricontate il 09-09 in Music/meetily-recordings: 28 cartelle con
   // audio, 25 con `trascrizione.md`. Sono tutte e tre del 23 luglio, tutte e
@@ -263,6 +289,29 @@ const risposteFinte: Record<string, unknown> = {
   // riunioni, e senza il servetto li offrirebbe a tutta la rete aziendale.
   // Niente entra nel repo: il testo resta sul disco, il servetto e' solo per
   // guardare la schermata. Dentro Tauri lo stesso comando lo fa Rust.
+  // Il riassunto finto: il motore di Meetily nel finto non c'e'; qui il
+  // riassunto arriva dopo sei secondi ed e' un esempio di forma (non viene
+  // da nessuna riunione vera). `riassunto.md` nel finto vive in memoria.
+  read_summary: ({ folder }: { folder?: string }) =>
+    (folder && riassuntiFinti.get(folder)) ?? null,
+  write_summary: ({ folder, text }: { folder?: string; text?: string }) => {
+    if (folder && text) riassuntiFinti.set(folder, text);
+    return null;
+  },
+  ensure_meeting_for_folder: ({ folder }: { folder?: string }) => folder ?? "",
+  builtin_ai_get_available_summary_model: "gemma3:1b",
+  api_process_transcript: ({ meetingId }: { meetingId?: string }) => {
+    if (meetingId) riassuntiInCorso.set(meetingId, Date.now());
+    return { message: "Summary generation started", process_id: meetingId };
+  },
+  api_get_summary: ({ meetingId }: { meetingId?: string }) => {
+    const dal = meetingId ? riassuntiInCorso.get(meetingId) : undefined;
+    if (!dal) return { status: "pending", meeting_id: meetingId, data: null, error: null };
+    if (Date.now() - dal < 6000) {
+      return { status: "processing", meeting_id: meetingId, data: null, error: null };
+    }
+    return { status: "completed", meeting_id: meetingId, data: { markdown: RIASSUNTO_DI_FORMA }, error: null };
+  },
   // l'audio da riascoltare: nel finto e' gia' un indirizzo (convertFileSrc
   // finto lascia tutto com'e'), nell'app vera e' un percorso sul disco
   recording_audio_path: ({ folder }: { folder?: string }) => {

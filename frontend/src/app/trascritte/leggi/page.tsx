@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 
 import { Page, PageLoading } from "@/components/layout/Page";
 import { Spinner } from "@/components/ui/spinner";
@@ -10,7 +11,10 @@ import { useTrascrizione } from "@/hooks/useTrascrizione";
 import { useTrascritte } from "@/hooks/useTrascritte";
 import { orario, type Turno } from "@/types/trascrizione";
 import { useLettore } from "@/contexts/LettoreContext";
+import { useConfig } from "@/contexts/ConfigContext";
 import { LettoreFoglio } from "@/app/_components/lettore/Lettore";
+import { Markdown } from "@/app/_components/foglio/Markdown";
+import { avviaRiassunto, dimenticaRiassunto, useStatoRiassunto } from "@/lib/riassunti";
 
 /** Ogni quanti secondi si mette un orario a margine del foglio. */
 const OGNI = 5 * 60;
@@ -85,16 +89,83 @@ function Foglio({ folder, turni }: { folder: string; turni: Turno[] }) {
   );
 }
 
+/** Il foglio col riassunto sopra (galleria 14, numero 1: la linguetta Riassunto). */
+function FoglioRiassunto({ markdown }: { markdown: string }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto bg-background pt-6">
+      <article className="mx-auto w-175 max-w-full rounded-t-lg bg-foglio px-9 pt-7 pb-16 font-serif text-[16px] leading-[1.75] text-foglio-foreground">
+        <Markdown testo={markdown} />
+      </article>
+    </div>
+  );
+}
+
+/** «3 min» per quanto sta lavorando il modello. */
+function daQuanto(iniziatoAlle: number, adesso: number): string {
+  const s = Math.max(0, Math.floor((adesso - iniziatoAlle) / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`;
+}
+
+type Linguetta = "testo" | "riassunto";
+
 function LeggiContenuto() {
   const router = useRouter();
   const folder = useSearchParams().get("folder");
-  const { turni, caricando, errore } = useTrascrizione(folder);
+  const { turni, testo, caricando, errore } = useTrascrizione(folder);
   const { trascritte } = useTrascritte();
   const scheda = trascritte.find((t) => t.folder === folder);
+  const { modelConfig } = useConfig();
+
+  // Il riassunto: quello sul disco (`riassunto.md`), e quello che si sta
+  // facendo adesso (`lib/riassunti.ts`, vive fuori dalla pagina).
+  const [riassunto, setRiassunto] = useState<string | null>(null);
+  const [linguetta, setLinguetta] = useState<Linguetta>("testo");
+  const stato = useStatoRiassunto(folder);
+  const [adesso, setAdesso] = useState(0);
+
+  useEffect(() => {
+    if (!folder) return;
+    let annullato = false;
+    void invoke<string | null>("read_summary", { folder })
+      .then((r) => {
+        if (!annullato) setRiassunto(r);
+      })
+      .catch((e) => console.info("[foglio] riassunto non letto", e));
+    return () => {
+      annullato = true;
+    };
+  }, [folder]);
+
+  // il riassunto appena fatto prende il posto di quello letto dal disco
+  // (il lavoro vive fuori da React: qui lo si raccoglie e lo si mette via)
+  useEffect(() => {
+    if (stato?.fase === "fatto" && folder) {
+      const t = setTimeout(() => {
+        setRiassunto(stato.markdown);
+        setLinguetta("riassunto");
+        dimenticaRiassunto(folder);
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [stato, folder]);
+
+  // l'orologio di «sta lavorando da N min»
+  useEffect(() => {
+    if (stato?.fase !== "lavora") return;
+    const t = setInterval(() => setAdesso(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [stato?.fase]);
+  const inizio = stato?.fase === "lavora" ? stato.iniziatoAlle : 0;
 
   if (!folder) {
     return <PageLoading>Nessuna riunione indicata.</PageLoading>;
   }
+
+  const riassumi = () => {
+    if (!testo) return;
+    const preferito = modelConfig.provider === "builtin-ai" ? modelConfig.model : null;
+    avviaRiassunto(folder, testo, preferito);
+  };
 
   return (
     <Page>
@@ -115,6 +186,46 @@ function LeggiContenuto() {
           </p>
         )}
         <LettoreFoglio folder={folder} />
+        {/* RIASSUMI finche' non c'e'; poi le due linguette (galleria 14 -> 1) */}
+        {riassunto ? (
+          <div className="flex gap-0.5 rounded-full bg-muted p-0.75 text-xs">
+            {(["testo", "riassunto"] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                onClick={() => setLinguetta(l)}
+                className={`rounded-full px-3.5 py-1 ${
+                  linguetta === l
+                    ? "bg-ambra font-semibold text-ambra-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {l === "testo" ? "Testo" : "Riassunto"}
+              </button>
+            ))}
+          </div>
+        ) : stato?.fase === "lavora" ? (
+          <span className="flex items-center gap-2 text-xs text-info">
+            <Spinner size="sm" />
+            Sta riassumendo · {adesso > 0 ? daQuanto(inizio, adesso) : "0 s"}
+          </span>
+        ) : (
+          <span className="flex items-center gap-3">
+            {stato?.fase === "errore" && (
+              <span className="max-w-72 truncate text-xs text-destructive" title={stato.messaggio}>
+                {stato.messaggio}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={riassumi}
+              disabled={!testo}
+              className="rounded-full border border-ambra px-3.5 py-1 text-xs font-semibold tracking-wide text-ambra hover:bg-ambra hover:text-ambra-foreground disabled:opacity-40"
+            >
+              RIASSUMI
+            </button>
+          </span>
+        )}
       </div>
 
       {caricando ? (
@@ -127,6 +238,8 @@ function LeggiContenuto() {
             {errore}
           </p>
         </PageLoading>
+      ) : riassunto && linguetta === "riassunto" ? (
+        <FoglioRiassunto markdown={riassunto} />
       ) : (
         <Foglio folder={folder} turni={turni} />
       )}
