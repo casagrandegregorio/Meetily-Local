@@ -252,6 +252,10 @@ const AVANZAMENTO: &str = "avanzamento.json";
 const REGISTRO: &str = "trascrizione.log";
 const SCRIPT: &str = "riunione.py";
 const STORE_TRASCRIVI: &str = "trascrivi.json";
+/// Il pid del programma che sta trascrivendo, scritto nella cartella: e'
+/// la prova di vita quando l'app e' stata chiusa e riaperta e `InCorso` non
+/// sa piu' niente (15-09, riletto il codice).
+const PID: &str = "trascrizione.pid";
 
 /// Quello che lo script scrive in `avanzamento.json`, com'e'.
 #[derive(Serialize, Deserialize, Clone)]
@@ -338,6 +342,12 @@ pub async fn start_transcription<R: Runtime>(
         return Err(format!("{:?} e' gia' trascritta.", folder));
     }
     let script_dir = cartella_script(&app)?;
+    if vivo_su_disco(&dir) {
+        return Err(format!(
+            "{:?} si sta gia' trascrivendo (da prima che l'app fosse riaperta).",
+            folder
+        ));
+    }
 
     {
         let mut set = in_corso.0.lock().map_err(|e| e.to_string())?;
@@ -418,13 +428,16 @@ pub async fn start_transcription<R: Runtime>(
         }
     };
     log::info!("Trascrizione avviata su {:?} (pid {})", folder, figlio.id());
+    let _ = std::fs::write(dir.join(PID), figlio.id().to_string());
 
     let app2 = app.clone();
     let folder2 = folder.clone();
+    let pid_file = dir.join(PID);
     std::thread::spawn(move || {
         let esito = figlio.wait();
         let ok = esito.as_ref().map(|s| s.success()).unwrap_or(false);
         log::info!("Trascrizione finita su {:?}: {:?}", folder2, esito);
+        let _ = std::fs::remove_file(&pid_file);
         if let Ok(mut set) = app2.state::<InCorso>().0.lock() {
             set.remove(&folder2);
         }
@@ -436,13 +449,28 @@ pub async fn start_transcription<R: Runtime>(
     Ok(())
 }
 
+/// Il programma segnato in `trascrizione.pid` e' ancora vivo? Serve quando
+/// `InCorso` non lo sa: l'app e' stata chiusa e riaperta mentre lo script
+/// girava. Costa un giro dei processi: si chiama solo in quel caso.
+fn vivo_su_disco(dir: &Path) -> bool {
+    let Ok(testo) = std::fs::read_to_string(dir.join(PID)) else {
+        return false;
+    };
+    let Ok(pid) = testo.trim().parse::<u32>() else {
+        return false;
+    };
+    let sistema = sysinfo::System::new_all();
+    sistema.process(sysinfo::Pid::from_u32(pid)).is_some()
+}
+
 /// Quello che c'e' in `avanzamento.json`, `None` se non c'e'. Se il file
-/// dice «in corso» ma nessun programma sta girando su quella cartella, la
+/// dice «in corso» ma nessun programma sta girando su quella cartella —
+/// ne' fra quelli lanciati da questa sessione, ne' col pid sul disco — la
 /// fase diventa `interrotta`.
 fn esito_su_disco(dir: &Path, vivo: bool) -> Option<Avanzamento> {
     let mut stato = leggi_json::<Avanzamento>(&dir.join(AVANZAMENTO))?;
     let in_lavoro = matches!(stato.fase.as_str(), "avviata" | "testo" | "voci");
-    if in_lavoro && !vivo {
+    if in_lavoro && !vivo && !vivo_su_disco(dir) {
         stato.fase = "interrotta".into();
     }
     Some(stato)
@@ -491,7 +519,7 @@ pub async fn trash_recording<R: Runtime>(
         .lock()
         .map(|set| set.contains(&folder))
         .unwrap_or(false);
-    if vivo {
+    if vivo || vivo_su_disco(&dir) {
         return Err(format!("{:?} si sta trascrivendo: prima aspetta che finisca.", folder));
     }
     trash::delete(&dir).map_err(|e| format!("Non sono riuscito a mettere {:?} nel Cestino: {}", folder, e))?;
@@ -587,10 +615,10 @@ pub async fn trash_transcript<R: Runtime>(
         .lock()
         .map(|set| set.contains(&folder))
         .unwrap_or(false);
-    if vivo {
+    if vivo || vivo_su_disco(&dir) {
         return Err(format!("{:?} si sta trascrivendo: prima aspetta che finisca.", folder));
     }
-    const PRODOTTI: [&str; 8] = [
+    const PRODOTTI: [&str; 9] = [
         TESTO,
         "trascrizione.md.prima",
         "testo.json",
@@ -598,6 +626,7 @@ pub async fn trash_transcript<R: Runtime>(
         VOCI,
         AVANZAMENTO,
         REGISTRO,
+        PID,
         RIASSUNTO,
     ];
     let da_buttare: Vec<PathBuf> = PRODOTTI

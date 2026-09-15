@@ -11,6 +11,7 @@ import { useTrascritte } from "@/hooks/useTrascritte";
 import { chiCera, durata, giorno, type Trascritta } from "@/types/trascritta";
 import { LettoreRiga } from "@/app/_components/lettore/Lettore";
 import { useLavori } from "@/contexts/LavoriContext";
+import { useLettore } from "@/contexts/LettoreContext";
 import { getErrorMessage } from "@/lib/utils";
 
 /** Il posto «Trascritte»: le riunioni che hanno gia' un testo, dalla piu' recente. */
@@ -18,6 +19,7 @@ export default function Trascritte() {
   const router = useRouter();
   const { trascritte } = useTrascritte();
   const { segnala } = useLavori();
+  const { scarica } = useLettore();
   // la riga che sta chiedendo «nel Cestino?»
   const [daConfermare, setDaConfermare] = useState<string | null>(null);
 
@@ -25,6 +27,7 @@ export default function Trascritte() {
   // Da trascrivere, e da li' si butta tutto (15-09, due passi voluti da Greg).
   const cestino = (t: Trascritta) => {
     setDaConfermare(null);
+    scarica(t.folder);
     invoke("trash_transcript", { folder: t.folder })
       .then(() => {
         toast.success("Testo nel Cestino: la riunione torna in Da trascrivere", {

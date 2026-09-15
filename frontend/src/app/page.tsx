@@ -36,6 +36,7 @@ import { useBarrette } from "@/hooks/useBarrette";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
+import { useLettore } from "@/contexts/LettoreContext";
 import { RigaLavoro } from "./_components/scheda/RigaLavoro";
 import { COMANDO_CESTINO } from "@/types/arretrata";
 
@@ -73,6 +74,7 @@ export default function Home() {
   const { registrata, ferma, scarta } = useFermaRegistrazione(setIsRecordingState);
   // le trascrizioni in corso: la riga sottile sotto la scheda (galleria 12)
   const { lavori, avvia, chiudi, segnala } = useLavori();
+  const { scarica } = useLettore();
 
   // Recovery
   const {
@@ -256,6 +258,7 @@ export default function Home() {
     scarta();
   };
   const butta = (folder: string) => {
+    scarica(folder);
     invoke(COMANDO_CESTINO, { folder })
       .then(() => {
         toast.success("Nel Cestino", { description: folder, duration: 4000 });

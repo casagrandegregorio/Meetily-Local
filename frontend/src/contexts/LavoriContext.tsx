@@ -97,7 +97,9 @@ export function LavoriProvider({ children }: { children: ReactNode }) {
 
   const avvia = useCallback(
     async (folder: string, minutes: number) => {
-      if (lavoriRef.current.some((l) => l.folder === folder && !finito(l))) return;
+      if (lavoriRef.current.some((l) => l.folder === folder && !finito(l))) {
+        throw new Error("Si sta gia' trascrivendo.");
+      }
       await invoke(COMANDO_AVVIA, { folder });
       setLavori((prima) => [
         ...prima.filter((l) => l.folder !== folder),

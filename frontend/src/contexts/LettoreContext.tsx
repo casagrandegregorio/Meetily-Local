@@ -41,6 +41,8 @@ interface Lettore {
   alterna: (folder: string) => Promise<void>;
   /** salta a un secondo della riunione caricata (o la carica, se e' un'altra) */
   salta: (folder: string, secondi: number) => Promise<void>;
+  /** ferma e dimentica una riunione: prima di metterla nel Cestino */
+  scarica: (folder: string) => void;
   errore: string | null;
 }
 
@@ -79,13 +81,29 @@ export function LettoreProvider({ children }: { children: ReactNode }) {
     async (nuovo: string) => {
       const a = audio.current;
       if (!a) return;
-      if (folder === nuovo && a.src) return;
+      // la stessa riunione, gia' aperta e senza errori: non si ricarica
+      if (folder === nuovo && a.src && !errore) return;
       setErrore(null);
       setTempo(0);
       setDurata(0);
       const percorso = await invoke<string>(COMANDO_AUDIO, { folder: nuovo });
       a.src = convertFileSrc(percorso);
       setFolder(nuovo);
+    },
+    [folder, errore],
+  );
+
+  const scarica = useCallback(
+    (quale: string) => {
+      const a = audio.current;
+      if (!a || folder !== quale) return;
+      a.pause();
+      a.removeAttribute("src");
+      a.load();
+      setFolder(null);
+      setTempo(0);
+      setDurata(0);
+      setErrore(null);
     },
     [folder],
   );
@@ -129,8 +147,8 @@ export function LettoreProvider({ children }: { children: ReactNode }) {
   );
 
   const valore = useMemo(
-    () => ({ folder, inPausa, tempo, durata, riproduci, pausa, alterna, salta, errore }),
-    [folder, inPausa, tempo, durata, riproduci, pausa, alterna, salta, errore],
+    () => ({ folder, inPausa, tempo, durata, riproduci, pausa, alterna, salta, scarica, errore }),
+    [folder, inPausa, tempo, durata, riproduci, pausa, alterna, salta, scarica, errore],
   );
   return <Contesto.Provider value={valore}>{children}</Contesto.Provider>;
 }
