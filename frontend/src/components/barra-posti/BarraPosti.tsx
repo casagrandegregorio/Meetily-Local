@@ -3,7 +3,6 @@
 import { usePathname, useRouter } from "next/navigation";
 import { Circle, Hourglass, List, Settings as SettingsIcon } from "lucide-react";
 
-import Info from "@/components/Info";
 import { useArretrate } from "@/hooks/useArretrate";
 import { finito, useLavori } from "@/contexts/LavoriContext";
 
@@ -83,7 +82,6 @@ export function BarraPosti() {
           <SettingsIcon className="size-4.25" />
           <span>Impostazioni</span>
         </button>
-        <Info isCollapsed />
       </div>
     </nav>
   );

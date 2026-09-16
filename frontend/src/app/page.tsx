@@ -110,13 +110,12 @@ export default function Home() {
         } catch (err) {
           console.warn("Failed to clean up saved meetings:", err);
         }
+        // La finestra «Recover Interrupted Meetings» di Meetily non si apre
+        // piu' (16-09): parlava del suo archivio dei testi dal vivo, che qui
+        // non si usa. Il controllo resta, per il registro.
         const meetings = await checkForRecoverableTranscripts();
-        if (
-          meetings.length > 0 &&
-          !sessionStorage.getItem("recovery_dialog_shown")
-        ) {
-          setShowRecoveryDialog(true);
-          sessionStorage.setItem("recovery_dialog_shown", "true");
+        if (meetings.length > 0) {
+          console.info("[avvio] riunioni recuperabili di Meetily, ignorate:", meetings.length);
         }
       } catch (err) {
         console.error("Startup checks failed:", err);

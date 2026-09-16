@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import type { Arretrata } from "@/types/arretrata";
-import type { Lavoro } from "@/contexts/LavoriContext";
+import { finito, type Lavoro } from "@/contexts/LavoriContext";
 import { durata } from "@/types/trascritta";
 
 import { Anellino, paroleLavoro, tintaLavoro } from "./RigaLavoro";
@@ -38,7 +38,10 @@ export function PaginaArretrate({
   onTrascrivi,
   onCestino,
 }: PaginaArretrateProps) {
-  const lavoroDi = (folder: string) => lavori.find((l) => l.folder === folder);
+  // un lavoro conta solo finche' lavora: a cose fatte parla il disco (16-09:
+  // testo buttato, la riga restava «Pronta» finche' non si chiudeva la x)
+  const lavoroDi = (folder: string) =>
+    lavori.find((l) => l.folder === folder && !finito(l));
   // la riga che sta chiedendo «nel Cestino?»
   const [daConfermare, setDaConfermare] = useState<string | null>(null);
 

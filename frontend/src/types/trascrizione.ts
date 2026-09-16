@@ -35,7 +35,10 @@ export function leggiTurni(markdown: string): Turno[] {
 
 /** «05:00» — minuti e secondi. */
 export function orario(secondi: number): string {
-  const mm = Math.floor(secondi / 60);
-  const ss = secondi % 60;
+  // il backend manda anche i decimali (16-09: sulla scheda si vedevano i
+  // millesimi e uscivano dal riquadro): qui contano i secondi interi
+  const interi = Math.floor(secondi);
+  const mm = Math.floor(interi / 60);
+  const ss = interi % 60;
   return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }

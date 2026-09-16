@@ -18,7 +18,7 @@ import { getErrorMessage } from "@/lib/utils";
 export default function Trascritte() {
   const router = useRouter();
   const { trascritte } = useTrascritte();
-  const { segnala } = useLavori();
+  const { segnala, chiudi } = useLavori();
   const { scarica } = useLettore();
   // la riga che sta chiedendo «nel Cestino?»
   const [daConfermare, setDaConfermare] = useState<string | null>(null);
@@ -30,6 +30,7 @@ export default function Trascritte() {
     scarica(t.folder);
     invoke("trash_transcript", { folder: t.folder })
       .then(() => {
+        chiudi(t.folder);
         toast.success("Testo nel Cestino: la riunione torna in Da trascrivere", {
           description: t.folder,
           duration: 5000,
