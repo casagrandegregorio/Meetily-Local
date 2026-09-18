@@ -450,6 +450,11 @@ impl RecordingManager {
         self.stream_manager.active_stream_count()
     }
 
+    /// La sentinella del silenzio, da mettere prima di `start_recording`.
+    pub fn set_sentinella_silenzio(&mut self, sentinella: super::sentinella_silenzio::SentinellaSilenzio) {
+        self.recording_saver.set_sentinella(sentinella);
+    }
+
     /// Set error callback for handling errors
     pub fn set_error_callback<F>(&self, callback: F)
     where

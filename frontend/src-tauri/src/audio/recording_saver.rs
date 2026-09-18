@@ -10,6 +10,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 use super::recording_state::AudioChunk;
+use super::sentinella_silenzio::SentinellaSilenzio;
 
 /// Append-only log of transcript lines, kept in the meeting folder *while* the
 /// recording runs.
@@ -91,6 +92,8 @@ pub struct RecordingSaver {
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
     is_saving: Arc<Mutex<bool>>,
+    /// la sentinella del silenzio, se qualcuno vuole essere avvisato
+    sentinella: Option<SentinellaSilenzio>,
 }
 
 impl RecordingSaver {
@@ -103,7 +106,14 @@ impl RecordingSaver {
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
+            sentinella: None,
         }
+    }
+
+    /// Mette la sentinella del silenzio sull'audio che va su disco. Va
+    /// chiamata prima di `start_accumulation`, che se la porta nel suo compito.
+    pub fn set_sentinella(&mut self, sentinella: SentinellaSilenzio) {
+        self.sentinella = Some(sentinella);
     }
 
     /// Set the meeting name for this recording session
@@ -236,6 +246,7 @@ impl RecordingSaver {
         let is_saving_clone = self.is_saving.clone();
         let incremental_saver_arc = self.incremental_saver.clone();
         let save_audio = auto_save;
+        let mut sentinella = self.sentinella.take();
 
         if let Some(mut receiver) = self.chunk_receiver.take() {
             tokio::spawn(async move {
@@ -254,6 +265,11 @@ impl RecordingSaver {
 
                     if !should_continue {
                         break;
+                    }
+
+                    // la sentinella ascolta proprio quello che va su disco
+                    if let Some(s) = sentinella.as_mut() {
+                        s.ascolta(&chunk.data);
                     }
 
                     // Only process audio chunks if auto_save is enabled

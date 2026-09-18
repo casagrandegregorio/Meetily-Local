@@ -4,20 +4,18 @@
 // e dove finisce, piu' «Prova il microfono». Prende il posto di
 // `RecordingSettings` di Meetily, che resta nel repo.
 //
-// I due apparecchi sono quelli che la registrazione usa davvero: se non c'e'
-// una scelta, i predefiniti di Windows (`get_default_audio_devices`), gli
-// stessi che prende `start_recording`.
+// I due apparecchi sono `MenuApparecchi`, lo stesso pezzo che sta sulla
+// scheda: scrivono nel file delle preferenze, l'unica memoria della scelta
+// (18-09, vedi `usePreferenzeRegistrazione`).
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 
-import type { AudioDevice } from "@/components/DeviceSelection";
-import type { RecordingPreferences } from "@/components/RecordingSettings";
+import { MenuApparecchi } from "@/app/_components/MenuApparecchi";
 import { useAudioLevels } from "@/hooks/useAudioLevels";
 import { useBarrette } from "@/hooks/useBarrette";
+import { usePreferenzeRegistrazione } from "@/hooks/usePreferenzeRegistrazione";
 import { getErrorMessage } from "@/lib/utils";
-
-const PREDEFINITO = "";
 
 function Campo({
   nome,
@@ -61,59 +59,23 @@ function Barrette({ valori }: { valori: number[] }) {
 }
 
 export function ImpostazioniRegistrazione() {
-  const [prefs, setPrefs] = useState<RecordingPreferences | null>(null);
-  const [apparecchi, setApparecchi] = useState<AudioDevice[]>([]);
-  const [predefiniti, setPredefiniti] = useState<[string | null, string | null]>([null, null]);
+  const preferenze = usePreferenzeRegistrazione();
+  const { prefs, salvando } = preferenze;
   const [cartella, setCartella] = useState("");
   const [provaMicrofono, setProvaMicrofono] = useState(false);
-  const [salvando, setSalvando] = useState(false);
 
+  // la cartella si scrive a mano e si conferma con CAMBIA: parte dal file
+  const cartellaSalvata = prefs?.save_folder;
   useEffect(() => {
-    let annullato = false;
-    void (async () => {
-      try {
-        const p = await invoke<RecordingPreferences>("get_recording_preferences");
-        if (annullato) return;
-        setPrefs(p);
-        setCartella(p.save_folder);
-      } catch (errore) {
-        console.info("[impostazioni] preferenze non leggibili", errore);
-      }
-      try {
-        const elenco = await invoke<AudioDevice[]>("get_audio_devices");
-        if (!annullato && Array.isArray(elenco)) setApparecchi(elenco);
-      } catch (errore) {
-        console.info("[impostazioni] apparecchi non leggibili", errore);
-      }
-      try {
-        const coppia = await invoke<[string | null, string | null]>("get_default_audio_devices");
-        if (!annullato && Array.isArray(coppia)) setPredefiniti(coppia);
-      } catch (errore) {
-        console.info("[impostazioni] predefiniti non leggibili", errore);
-      }
-    })();
-    return () => {
-      annullato = true;
-    };
-  }, []);
+    if (cartellaSalvata !== undefined) setCartella(cartellaSalvata);
+  }, [cartellaSalvata]);
 
-  const salva = async (nuove: Partial<RecordingPreferences>) => {
-    if (!prefs) return;
-    const p = { ...prefs, ...nuove };
-    setSalvando(true);
-    try {
-      await invoke("set_recording_preferences", { preferences: p });
-      setPrefs(p);
-      toast.success("Salvato", { duration: 2000 });
-    } catch (errore) {
-      toast.error("Non salvato", { description: getErrorMessage(errore), duration: 8000 });
-    } finally {
-      setSalvando(false);
-    }
-  };
-
-  const ingressi = apparecchi.filter((d) => d.device_type === "Input" && d.name !== "default");
-  const uscite = apparecchi.filter((d) => d.device_type === "Output" && d.name !== "default");
+  const salva = (nuove: Parameters<typeof preferenze.salva>[0]) =>
+    preferenze.salva(nuove).then(
+      () => toast.success("Salvato", { duration: 2000 }),
+      (errore) =>
+        toast.error("Non salvato", { description: getErrorMessage(errore), duration: 8000 }),
+    );
 
   // il microfono che si ascolta nella prova: quello scelto, oppure «default»,
   // il nome che il monitor del backend risolve da solo (sulla scheda mentre
@@ -124,41 +86,7 @@ export function ImpostazioniRegistrazione() {
 
   return (
     <div>
-      <Campo nome="Microfono">
-        <select
-          className={classeValore}
-          value={prefs?.preferred_mic_device ?? PREDEFINITO}
-          disabled={!prefs || salvando}
-          onChange={(e) => void salva({ preferred_mic_device: e.target.value || null })}
-        >
-          <option value={PREDEFINITO}>
-            Predefinito di Windows{predefiniti[0] ? ` · ${predefiniti[0]}` : ""}
-          </option>
-          {ingressi.map((d) => (
-            <option key={d.name} value={d.name}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-      </Campo>
-
-      <Campo nome="Audio del PC" sotto="quello che senti tu: Teams, le cuffie">
-        <select
-          className={classeValore}
-          value={prefs?.preferred_system_device ?? PREDEFINITO}
-          disabled={!prefs || salvando}
-          onChange={(e) => void salva({ preferred_system_device: e.target.value || null })}
-        >
-          <option value={PREDEFINITO}>
-            Predefinito di Windows{predefiniti[1] ? ` · ${predefiniti[1]}` : ""}
-          </option>
-          {uscite.map((d) => (
-            <option key={d.name} value={d.name}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-      </Campo>
+      <MenuApparecchi preferenze={preferenze} forma="campo" className={classeValore} Campo={Campo} />
 
       <Campo nome="Cartella delle registrazioni">
         <input

@@ -188,6 +188,12 @@ export function SchedaRiunione({
             {momento.secondi === null ? "00:00" : orario(momento.secondi)}
           </div>
           <Livello valori={livelli} />
+          {momento.silenzio != null && (
+            <div className="text-sm font-medium text-destructive">
+              Non sento niente da {durata(Math.round(momento.silenzio / 60))}: controlla microfono e
+              audio del PC
+            </div>
+          )}
         </Scheda>
       );
 

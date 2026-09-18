@@ -427,27 +427,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     };
   }, [updateProviderApiKey]);
 
-  // Load device preferences on mount
-  useEffect(() => {
-    const loadDevicePreferences = async () => {
-      try {
-        const prefs = await configService.getRecordingPreferences();
-        if (
-          prefs &&
-          (prefs.preferred_mic_device || prefs.preferred_system_device)
-        ) {
-          setSelectedDevices({
-            micDevice: prefs.preferred_mic_device,
-            systemDevice: prefs.preferred_system_device,
-          });
-          console.log("Loaded device preferences:", prefs);
-        }
-      } catch (error) {
-        console.log("No device preferences found or failed to load:", error);
-      }
-    };
-    loadDevicePreferences();
-  }, []);
+  // `selectedDevices` NON e' piu' la scelta con cui si registra (18-09): la
+  // scelta sta solo nel file delle preferenze, letto dal motore allo Start
+  // e dalla pagina con `usePreferenzeRegistrazione`. Resta qui per i pezzi
+  // di Meetily non montati (SettingsModal, DeviceSummary) e non si carica
+  // piu' dal file: teneva una copia vecchia, e la copia vecchia ha perso una
+  // riunione.
 
   // Calculate model options based on available models. Memoized so the value
   // object below doesn't change on every render (preserve-manual-memoization).

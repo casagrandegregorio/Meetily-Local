@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Momento, TipoMomento } from "@/types/momento";
+import type { Momento } from "@/types/momento";
 import { COMANDO_TESTO, leggiTurni } from "@/types/trascrizione";
 
 import { siamoNelFinto } from "./tauri-finto";
@@ -25,9 +25,12 @@ const QUATTRO_SETTEMBRE = "Meeting 2026-09-04_09-02-34_2026-09-04_07-02";
 // (`trascrivi/registrazioni.md`).
 const VENTISETTE_AGOSTO = "Meeting 2026-08-27_15-02-24_2026-08-27_13-02";
 
-const MOMENTI_FINTI: Record<TipoMomento, Momento> = {
+// le chiavi sono i sei momenti piu' qualche variante (`registra-muta`)
+const MOMENTI_FINTI: Record<string, Momento> = {
   ferma: { tipo: "ferma" },
   registra: { tipo: "registra", secondi: 12 * 60 + 34 },
+  // la sentinella del silenzio che avvisa: 2 minuti e mezzo senza niente
+  "registra-muta": { tipo: "registra", secondi: 12 * 60 + 34, silenzio: 150 },
   registrata: { tipo: "registrata", folder: QUATTRO_SETTEMBRE, minutes: 94 },
   // al 38%, come nella galleria 5: 36 minuti su 94
   trascrive: { tipo: "trascrive", folder: QUATTRO_SETTEMBRE, fatti: 36, totale: 94 },
@@ -43,7 +46,7 @@ const MOMENTI_FINTI: Record<TipoMomento, Momento> = {
 
 function momentoFinto(nome: string | null): Momento | null {
   if (!nome) return null;
-  return nome in MOMENTI_FINTI ? MOMENTI_FINTI[nome as TipoMomento] : null;
+  return MOMENTI_FINTI[nome] ?? null;
 }
 
 /**

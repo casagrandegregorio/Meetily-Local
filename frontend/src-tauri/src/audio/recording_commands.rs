@@ -16,13 +16,15 @@ use tokio::task::JoinHandle;
 use super::{
     default_input_device,  // Get default microphone
     default_output_device, // Get default system audio
-    parse_audio_device,
+    AudioDevice,
     DeviceEvent,
     DeviceMonitorType,
     RecordingManager,
 };
 
 // Import transcription modules
+use super::devices::DeviceType;
+use super::sentinella_silenzio::SentinellaSilenzio;
 use super::transcription::{self, reset_speech_detected_flag};
 
 // Re-export TranscriptUpdate for backward compatibility
@@ -147,6 +149,114 @@ pub struct TranscriptionStatus {
 // RECORDING COMMANDS
 // ============================================================================
 
+/// La sentinella del silenzio per questa registrazione: dopo un minuto e
+/// mezzo senza niente sopra il silenzio manda alla pagina l'evento
+/// `registrazione-muta` (coi secondi di silenzio) e una notifica di Windows,
+/// cosi' si vede anche con Teams a tutto schermo; quando torna il suono,
+/// `registrazione-suono`. La notifica va diretta al plugin, non al
+/// NotificationManager di Meetily, che la tace se manca un consenso.
+fn sentinella_per<R: Runtime>(app: &AppHandle<R>) -> SentinellaSilenzio {
+    use tauri_plugin_notification::NotificationExt;
+    let per_muta = app.clone();
+    let per_suono = app.clone();
+    SentinellaSilenzio::new(
+        48_000,
+        move |secondi| {
+            warn!("🔇 Registrazione muta da {} secondi", secondi);
+            let _ = per_muta.emit("registrazione-muta", serde_json::json!({ "secondi": secondi }));
+            if let Err(e) = per_muta
+                .notification()
+                .builder()
+                .title("Non sento niente")
+                .body("Sono passati piu' di 90 secondi senza suono: controlla microfono e audio del PC.")
+                .show()
+            {
+                warn!("Notifica di Windows non mostrata: {}", e);
+            }
+        },
+        move || {
+            info!("🔊 Torna il suono");
+            let _ = per_suono.emit("registrazione-suono", serde_json::json!({}));
+        },
+    )
+}
+
+/// Gli apparecchi con cui si registra: una memoria sola, il file delle
+/// preferenze (`recording_preferences.json`), letto al momento dello Start.
+///
+/// Il 18-09 la pagina teneva una sua copia della scelta, letta una volta
+/// all'avvio: chi cambiava il microfono nelle Impostazioni vedeva il file
+/// cambiare ma la registrazione partiva coi predefiniti di Windows, e una
+/// riunione di 37 minuti e' uscita muta. Da allora la scelta la legge il
+/// motore, qui, e la pagina non ne tiene copia.
+///
+/// Un nome passato per argomento vince sul file (serve ai comandi vecchi di
+/// Meetily). Un apparecchio scelto che non c'e' e' un errore, non un
+/// ripiego silenzioso sul predefinito: e' proprio il ripiego silenzioso che
+/// ha perso la riunione. Senza scelta: il predefinito di Windows; il microfono
+/// e' obbligatorio, l'audio del PC no.
+async fn scegli_apparecchi<R: Runtime>(
+    app: &AppHandle<R>,
+    mic_dalla_pagina: Option<String>,
+    sistema_dalla_pagina: Option<String>,
+) -> Result<(Option<Arc<AudioDevice>>, Option<Arc<AudioDevice>>), String> {
+    let (mic_dal_file, sistema_dal_file) =
+        match super::recording_preferences::load_recording_preferences(app).await {
+            Ok(prefs) => (prefs.preferred_mic_device, prefs.preferred_system_device),
+            Err(e) => {
+                warn!("Preferenze non leggibili, uso i predefiniti: {}", e);
+                (None, None)
+            }
+        };
+    let scelta_mic = mic_dalla_pagina.or(mic_dal_file);
+    let scelta_sistema = sistema_dalla_pagina.or(sistema_dal_file);
+    info!(
+        "🎛 Apparecchi scelti: microfono={:?}, audio del PC={:?} (None = predefinito di Windows)",
+        scelta_mic, scelta_sistema
+    );
+
+    // Il nome salvato e' quello nudo dell'elenco («Headset (Bose QC
+    // Headphones)»); il tipo lo dice il posto, microfono o audio del PC. Non
+    // si passa da `parse_audio_device`, che vuole il nome col suffisso
+    // «(input)» e rifiutava tutti i nomi salvati (secondo guasto del 18-09).
+    let elenco = super::devices::list_audio_devices()
+        .await
+        .map_err(|e| format!("Non riesco a leggere l'elenco degli apparecchi: {}", e))?;
+    let trova = |nome: &str, tipo: DeviceType| -> Option<AudioDevice> {
+        elenco
+            .iter()
+            .find(|d| d.device_type == tipo && d.name == nome)
+            .cloned()
+    };
+
+    let microfono = match scelta_mic {
+        Some(nome) => trova(&nome, DeviceType::Input).ok_or_else(|| {
+            format!("Il microfono scelto «{}» non c'e': scegline un altro", nome)
+        })?,
+        None => default_input_device()
+            .map_err(|e| format!("Nessun microfono disponibile: {}", e))?,
+    };
+    info!("🎤 Microfono: '{}'", microfono.name);
+
+    let sistema = match scelta_sistema {
+        Some(nome) => Some(trova(&nome, DeviceType::Output).ok_or_else(|| {
+            format!("L'audio del PC scelto «{}» non c'e': scegline un altro", nome)
+        })?),
+        None => match default_output_device() {
+            Ok(d) => Some(d),
+            Err(e) => {
+                warn!("⚠️ Nessun audio del PC predefinito ({}): registro solo il microfono", e);
+                None
+            }
+        },
+    };
+    if let Some(ref d) = sistema {
+        info!("🔊 Audio del PC: '{}'", d.name);
+    }
+
+    Ok((Some(Arc::new(microfono)), sistema.map(Arc::new)))
+}
+
 /// Start recording with default devices
 pub async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     start_recording_with_meeting_name(app, None).await
@@ -199,126 +309,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Load device preferences. Audio saving is no longer optional — see
-    // ALWAYS_SAVE_AUDIO below.
-    let (preferred_mic_name, preferred_system_name) =
-        match super::recording_preferences::load_recording_preferences(&app).await {
-            Ok(prefs) => {
-                info!(
-                    "📋 Loaded recording preferences: preferred_mic={:?}, preferred_system={:?}",
-                    prefs.preferred_mic_device, prefs.preferred_system_device
-                );
-                (prefs.preferred_mic_device, prefs.preferred_system_device)
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to load recording preferences, using defaults: {}",
-                    e
-                );
-                (None, None)
-            }
-        };
+    // Gli apparecchi li dice il file delle preferenze, letto adesso: e' la
+    // sola memoria della scelta (18-09, vedi `scegli_apparecchi`).
+    let (microphone_device, system_device) = scegli_apparecchi(&app, None, None).await?;
     let auto_save = ALWAYS_SAVE_AUDIO;
-
-    // ============================================================================
-    // MICROPHONE DEVICE RESOLUTION: Preference → Default → Error
-    // ============================================================================
-    let microphone_device = match preferred_mic_name {
-        Some(pref_name) => {
-            info!("🎤 Attempting to use preferred microphone: '{}'", pref_name);
-            match parse_audio_device(&pref_name) {
-                Ok(device) => {
-                    info!("✅ Using preferred microphone: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!(
-                        "⚠️ Preferred microphone '{}' not available: {}",
-                        pref_name, e
-                    );
-                    warn!("   Falling back to system default microphone...");
-                    match default_input_device() {
-                        Ok(device) => {
-                            info!("✅ Using default microphone: '{}'", device.name);
-                            Some(Arc::new(device))
-                        }
-                        Err(default_err) => {
-                            error!(
-                                "❌ No microphone available (preferred and default both failed)"
-                            );
-                            return Err(format!(
-                                "No microphone device available. Preferred device '{}' not found, and default microphone unavailable: {}",
-                                pref_name, default_err
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            info!("🎤 No microphone preference set, using system default");
-            match default_input_device() {
-                Ok(device) => {
-                    info!("✅ Using default microphone: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    error!("❌ No default microphone available");
-                    return Err(format!("No microphone device available: {}", e));
-                }
-            }
-        }
-    };
-
-    // ============================================================================
-    // SYSTEM AUDIO DEVICE RESOLUTION: Preference → Default → None (optional)
-    // ============================================================================
-    let system_device = match preferred_system_name {
-        Some(pref_name) => {
-            info!(
-                "🔊 Attempting to use preferred system audio: '{}'",
-                pref_name
-            );
-            match parse_audio_device(&pref_name) {
-                Ok(device) => {
-                    info!("✅ Using preferred system audio: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!(
-                        "⚠️ Preferred system audio '{}' not available: {}",
-                        pref_name, e
-                    );
-                    warn!("   Falling back to system default...");
-                    match default_output_device() {
-                        Ok(device) => {
-                            info!("✅ Using default system audio: '{}'", device.name);
-                            Some(Arc::new(device))
-                        }
-                        Err(default_err) => {
-                            warn!("⚠️ No system audio available (preferred and default both failed): {}", default_err);
-                            warn!("   Recording will continue with microphone only");
-                            None // System audio is optional
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            info!("🔊 No system audio preference set, using system default");
-            match default_output_device() {
-                Ok(device) => {
-                    info!("✅ Using default system audio: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("⚠️ No default system audio available: {}", e);
-                    warn!("   Recording will continue with microphone only");
-                    None // System audio is optional
-                }
-            }
-        }
-    };
 
     // Always ensure a meeting name is set so incremental saver initializes
     let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
@@ -333,6 +327,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     manager.set_error_callback(move |error| {
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
+    manager.set_sentinella_silenzio(sentinella_per(&app));
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
@@ -424,22 +419,15 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         info!("✅ Transcription model validation passed");
     }
 
-    // Parse devices
-    let mic_device = if let Some(ref name) = mic_device_name {
-        Some(Arc::new(parse_audio_device(name).map_err(|e| {
-            format!("Invalid microphone device '{}': {}", name, e)
-        })?))
-    } else {
-        None
-    };
-
-    let system_device = if let Some(ref name) = system_device_name {
-        Some(Arc::new(parse_audio_device(name).map_err(|e| {
-            format!("Invalid system device '{}': {}", name, e)
-        })?))
-    } else {
-        None
-    };
+    // Un nome arrivato dalla pagina vince; senza, si legge il file delle
+    // preferenze. Il 18-09 la pagina mandava sempre «nessuno» perche' la sua
+    // copia della scelta era vecchia, e il motore prendeva i predefiniti di
+    // Windows: da allora la pagina non manda nomi e la scelta la legge il
+    // motore da solo, dal file.
+    let (mic_device, system_device) =
+        scegli_apparecchi(&app, mic_device_name.clone(), system_device_name.clone()).await?;
+    let nome_mic = mic_device.as_ref().map(|d| d.name.clone());
+    let nome_sistema = system_device.as_ref().map(|d| d.name.clone());
 
     // Async-first approach for custom devices - no more blocking operations!
     info!("🚀 Starting async recording initialization with custom devices");
@@ -461,6 +449,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     manager.set_error_callback(move |error| {
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
+    manager.set_sentinella_silenzio(sentinella_per(&app));
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
@@ -487,8 +476,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         serde_json::json!({
             "message": "Recording started with custom devices and parallel processing",
             "devices": [
-                mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
-                system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
+                nome_mic.unwrap_or_else(|| "Default Microphone".to_string()),
+                nome_sistema.unwrap_or_else(|| "Default System Audio".to_string())
             ],
             "workers": 3
         }),

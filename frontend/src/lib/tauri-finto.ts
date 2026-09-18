@@ -185,6 +185,11 @@ const TRASCRITTE_FINTE = [
     trascritta("audio_2026-07-14_14-16", 88, 5, ["Marco"]),
 ];
 
+const preferenzeFinte: Record<string, unknown> = {
+  save_folder: "C:\\Users\\gcasagrande\\Music\\meetily-recordings",
+  auto_save: true, file_format: "mp4", preferred_mic_device: null, preferred_system_device: null,
+};
+
 // due riunioni finte, coi nomi di fantasia gia' in uso nel progetto
 const risposteFinte: Record<string, unknown> = {
   api_get_meetings: [
@@ -198,15 +203,19 @@ const risposteFinte: Record<string, unknown> = {
   // microfono» e teneva spento il pulsante per registrare.
   get_audio_devices: [
     { name: "Microphone Array (Intel Smart Sound)", device_type: "Input", is_default: true },
+    { name: "Headset (Bose QC Headphones)", device_type: "Input", is_default: false },
     { name: "Headphones (Bose QC)", device_type: "Output", is_default: true },
+    { name: "Speakers (Realtek Audio)", device_type: "Output", is_default: false },
   ],
   // i predefiniti di Windows, quelli che la registrazione usa davvero
   get_default_audio_devices: ["Microphone Array (Intel Smart Sound)", "Headphones (Bose QC)"],
-  get_recording_preferences: {
-    save_folder: "C:\\Users\\gcasagrande\\Music\\meetily-recordings",
-    auto_save: true, file_format: "mp4", preferred_mic_device: null, preferred_system_device: null,
+  // il file delle preferenze, tenuto in memoria: la scelta fatta sulla
+  // scheda si rivede nelle Impostazioni, e viceversa (18-09)
+  get_recording_preferences: () => ({ ...preferenzeFinte }),
+  set_recording_preferences: ({ preferences }: { preferences?: Record<string, unknown> }) => {
+    Object.assign(preferenzeFinte, preferences ?? {});
+    return null;
   },
-  set_recording_preferences: null,
   get_transcriber_folder: "C:\\Users\\gcasagrande\\.claude\\hub\\meeting-notes\\trascrivi",
   set_transcriber_folder: null,
   // le persone che gli script conoscono (memoria/voci-note.json, contate il

@@ -30,6 +30,7 @@ pub mod recording_commands;
 pub mod recording_manager;
 pub mod recording_preferences;
 pub mod recording_saver;
+pub mod sentinella_silenzio;
 pub mod recording_state;
 pub mod simple_level_monitor;
 pub mod stream;

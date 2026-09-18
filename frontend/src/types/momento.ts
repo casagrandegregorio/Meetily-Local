@@ -17,6 +17,11 @@ export type Momento =
       tipo: "registra";
       /** secondi dall'inizio; `null` finche' il backend non li manda */
       secondi: number | null;
+      /**
+       * secondi di silenzio, quando la sentinella del motore dice che da
+       * piu' di un minuto e mezzo non arriva niente (18-09); `null` se sente
+       */
+      silenzio?: number | null;
     }
   | {
       tipo: "registrata";

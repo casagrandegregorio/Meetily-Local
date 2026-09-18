@@ -33,6 +33,7 @@ import { SettingsModals } from "./_components/SettingsModal";
 import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
 import { useAudioLevels } from "@/hooks/useAudioLevels";
 import { useBarrette } from "@/hooks/useBarrette";
+import { usePreferenzeRegistrazione } from "@/hooks/usePreferenzeRegistrazione";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
@@ -43,7 +44,7 @@ import { COMANDO_CESTINO } from "@/types/arretrata";
 export default function Home() {
   const router = useRouter();
   const recordingState = useRecordingState();
-  const { transcriptModelConfig, selectedDevices } = useConfig();
+  const { transcriptModelConfig } = useConfig();
   const { setIsMeetingActive, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } =
     useModalState(transcriptModelConfig);
@@ -221,13 +222,54 @@ export default function Home() {
   }, []);
 
 
-  // Le barrette del livello mentre registra: l'apparecchio scelto, o quello di
-  // sistema. Fuori dalla registrazione il monitor sta spento.
+  // Le barrette del livello mentre registra: il microfono scelto nel file
+  // delle preferenze, o «default», il nome che il monitor risolve da solo.
+  // Fuori dalla registrazione il monitor sta spento.
+  const { prefs } = usePreferenzeRegistrazione();
   const nomiDaAscoltare = isRecording
-    ? [selectedDevices?.micDevice ?? "default"]
+    ? [prefs?.preferred_mic_device ?? "default"]
     : null;
   const livelliAudio = useAudioLevels(nomiDaAscoltare);
   const livelli = useBarrette(livelliAudio);
+
+  // La sentinella del silenzio del motore (`sentinella_silenzio.rs`): dopo un
+  // minuto e mezzo senza niente sopra il silenzio manda `registrazione-muta`
+  // coi secondi, e `registrazione-suono` quando torna qualcosa. Qui: la
+  // scheda lo scrive e un avviso resta finche' non si chiude. La notifica di
+  // Windows la manda il motore da solo, per chi sta su Teams a tutto schermo.
+  const [silenzio, setSilenzio] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isRecording) {
+      setSilenzio(null);
+      return;
+    }
+    let viaMuta: (() => void) | undefined;
+    let viaSuono: (() => void) | undefined;
+    (async () => {
+      try {
+        viaMuta = await listen<{ secondi: number }>("registrazione-muta", (e) => {
+          setSilenzio(e.payload.secondi);
+          toast.error("Non sento niente", {
+            id: "registrazione-muta",
+            description:
+              "Piu' di un minuto e mezzo senza suono: controlla il microfono e l'audio del PC.",
+            duration: Infinity,
+          });
+        });
+        viaSuono = await listen("registrazione-suono", () => {
+          setSilenzio(null);
+          toast.dismiss("registrazione-muta");
+        });
+      } catch (errore) {
+        console.error("Sentinella del silenzio non ascoltabile:", errore);
+      }
+    })();
+    return () => {
+      viaMuta?.();
+      viaSuono?.();
+      toast.dismiss("registrazione-muta");
+    };
+  }, [isRecording]);
 
   // Il momento della scheda, letto dallo stato vero: ferma, registra, e dopo
   // lo Stop «registrata» finche' non si preme TRASCRIVI. Poi la scheda torna
@@ -235,7 +277,7 @@ export default function Home() {
   // riga sottile sotto, non sulla scheda. I momenti trascrive / pronta /
   // muta della scheda restano per il finto (`/?momento=pronta`).
   const momentoVero: Momento = isRecording
-    ? { tipo: "registra", secondi: recordingState.recordingDuration }
+    ? { tipo: "registra", secondi: recordingState.recordingDuration, silenzio }
     : registrata
       ? { tipo: "registrata", ...registrata }
       : { tipo: "ferma" };

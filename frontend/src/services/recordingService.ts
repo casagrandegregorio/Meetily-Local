@@ -72,6 +72,21 @@ export class RecordingService {
    * @param meetingName - Meeting name/title
    * @returns Promise<void>
    */
+  /**
+   * Parte a registrare. Gli apparecchi NON si mandano: li legge il motore
+   * dal file delle preferenze al momento dello Start (`scegli_apparecchi` in
+   * `recording_commands.rs`). Il 18-09 la pagina mandava una copia vecchia
+   * della scelta e la riunione e' uscita muta: da allora la scelta ha una
+   * memoria sola, il file.
+   */
+  async avviaRegistrazione(meetingName: string): Promise<void> {
+    return invoke("start_recording_with_devices_and_meeting", {
+      mic_device_name: null,
+      system_device_name: null,
+      meeting_name: meetingName,
+    });
+  }
+
   async startRecordingWithDevices(
     micDeviceName: string | null,
     systemDeviceName: string | null,

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranscripts } from "@/contexts/TranscriptContext";
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
-import { useConfig } from "@/contexts/ConfigContext";
 import {
   useRecordingState,
   RecordingStatus,
@@ -38,7 +37,6 @@ export function useRecordingStart(
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
-  const { selectedDevices } = useConfig();
   const { setStatus } = useRecordingState();
 
   // Check if a local Whisper transcription model is downloaded and ready.
@@ -112,11 +110,7 @@ export function useRecordingStart(
 
       // Start the actual backend recording
       console.log("Starting backend recording with meeting:", meetingTitle);
-      await recordingService.startRecordingWithDevices(
-        selectedDevices?.micDevice || null,
-        selectedDevices?.systemDevice || null,
-        meetingTitle,
-      );
+      await recordingService.avviaRegistrazione(meetingTitle);
       console.log("Backend recording started successfully");
 
       // Update state after successful backend start
@@ -145,7 +139,6 @@ export function useRecordingStart(
     setIsMeetingActive,
     checkParakeetReady,
     checkIfModelDownloading,
-    selectedDevices,
     showModal,
     setStatus,
   ]);
@@ -208,11 +201,7 @@ export function useRecordingStart(
               "Auto-starting backend recording with meeting:",
               generatedMeetingTitle,
             );
-            const result = await recordingService.startRecordingWithDevices(
-              selectedDevices?.micDevice || null,
-              selectedDevices?.systemDevice || null,
-              generatedMeetingTitle,
-            );
+            const result = await recordingService.avviaRegistrazione(generatedMeetingTitle);
             console.log("Auto-start backend recording result:", result);
 
             // Update UI state after successful backend start
@@ -242,7 +231,6 @@ export function useRecordingStart(
   }, [
     isRecording,
     isAutoStarting,
-    selectedDevices,
     setMeetingTitle,
     setIsRecording,
     clearTranscripts,
@@ -310,11 +298,7 @@ export function useRecordingStart(
           "Starting backend recording with meeting:",
           generatedMeetingTitle,
         );
-        const result = await recordingService.startRecordingWithDevices(
-          selectedDevices?.micDevice || null,
-          selectedDevices?.systemDevice || null,
-          generatedMeetingTitle,
-        );
+        const result = await recordingService.avviaRegistrazione(generatedMeetingTitle);
         console.log("Backend recording result:", result);
 
         // Update UI state after successful backend start
@@ -349,7 +333,6 @@ export function useRecordingStart(
   }, [
     isRecording,
     isAutoStarting,
-    selectedDevices,
     setMeetingTitle,
     setIsRecording,
     clearTranscripts,

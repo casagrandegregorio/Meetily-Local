@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-
-import { useConfig } from "@/contexts/ConfigContext";
 import { usePermissionCheck } from "@/hooks/usePermissionCheck";
+import { usePreferenzeRegistrazione } from "@/hooks/usePreferenzeRegistrazione";
 import { useTrascritte } from "@/hooks/useTrascritte";
 import { Spinner } from "@/components/ui/spinner";
-import type { AudioDevice } from "@/components/DeviceSelection";
 import { chiCera, durata, giorno } from "@/types/trascritta";
+
+import { MenuApparecchi } from "../MenuApparecchi";
 
 interface SchedaFermaProps {
   onStart: () => void;
@@ -17,7 +15,8 @@ interface SchedaFermaProps {
 
 /**
  * Lo stato «ferma» della scheda al centro: il tondo ambra per partire e i due
- * apparecchi che ascoltano.
+ * apparecchi che ascoltano — due menu, gli stessi delle Impostazioni, che
+ * scrivono nel file delle preferenze (Greg, 18-09: si cambiano anche da qui).
  *
  * E' la scheda della galleria 1 numero 4, col colore della galleria 2 numero 1
  * e la figura che cambia col lavoro della galleria 4 numero 2 — qui nel suo
@@ -25,53 +24,11 @@ interface SchedaFermaProps {
  * pronta, muta) arrivano dopo, sulla stessa scheda.
  */
 export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
-  const { selectedDevices } = useConfig();
   const { hasMicrophone } = usePermissionCheck();
   const { trascritte } = useTrascritte();
+  const preferenze = usePreferenzeRegistrazione();
 
   const disabilitato = isStarting || !hasMicrophone;
-
-  // Nel contesto `null` vuol dire «quello di sistema», non «nessuno»: per
-  // scrivere un nome sulla scheda serve comunque chiedere l'elenco.
-  const [apparecchiVisti, setApparecchiVisti] = useState<AudioDevice[]>([]);
-  // I predefiniti di Windows: sono quelli che la registrazione usa davvero
-  // quando nelle impostazioni non c'e' una scelta. L'elenco non dice quale
-  // sia il predefinito, e mostrare il primo della lista sbagliava (15-09:
-  // sulla scheda c'era il monitor, non le cuffie).
-  const [predefiniti, setPredefiniti] = useState<[string | null, string | null]>([null, null]);
-  useEffect(() => {
-    let annullato = false;
-    void (async () => {
-      try {
-        const elenco = await invoke<AudioDevice[]>("get_audio_devices");
-        if (!annullato) setApparecchiVisti(elenco);
-      } catch (errore) {
-        console.info("[scheda] apparecchi non leggibili", errore);
-      }
-      try {
-        const coppia = await invoke<[string | null, string | null]>("get_default_audio_devices");
-        if (!annullato && Array.isArray(coppia)) setPredefiniti(coppia);
-      } catch (errore) {
-        console.info("[scheda] predefiniti non leggibili", errore);
-      }
-    })();
-    return () => {
-      annullato = true;
-    };
-  }, []);
-
-  const primoDelTipo = (tipo: "Input" | "Output") =>
-    apparecchiVisti.find((d) => d.device_type === tipo && d.name !== "default")
-      ?.name ?? null;
-
-  // I nomi degli apparecchi sono lunghi («Microphone Array (Intel Smart
-  // Sound)»): sulla scheda si tiene solo la parte prima della parentesi.
-  const nomeCorto = (nome?: string | null) =>
-    nome ? nome.split("(")[0].trim() : null;
-  const apparecchi = [
-    nomeCorto(selectedDevices?.micDevice ?? predefiniti[0] ?? primoDelTipo("Input")),
-    nomeCorto(selectedDevices?.systemDevice ?? predefiniti[1] ?? primoDelTipo("Output")),
-  ].filter((n): n is string => Boolean(n));
 
   // L'ultima riunione con un testo, dallo stesso elenco di «Trascritte»: la
   // riga sulla scheda ha la stessa forma di quelle dell'elenco, data · chi
@@ -101,18 +58,7 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
             {hasMicrophone ? "Pronta a registrare" : "Nessun microfono"}
           </div>
 
-          {apparecchi.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              {apparecchi.map((nome) => (
-                <span
-                  key={nome}
-                  className="inline-flex rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground"
-                >
-                  {nome}
-                </span>
-              ))}
-            </div>
-          )}
+          <MenuApparecchi preferenze={preferenze} forma="pastiglia" />
 
           {ultima && (
             <div className="text-sm text-muted-foreground">
