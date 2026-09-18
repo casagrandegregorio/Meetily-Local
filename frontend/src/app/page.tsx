@@ -124,11 +124,17 @@ export default function Home() {
     })();
   }, [checkForRecoverableTranscripts, recordingState.isRecording, status]);
 
+  // Se il motore dice di no allo Start — per esempio il microfono scelto
+  // non c'e' (le cuffie spente): «scegline un altro» — lo si legge in un
+  // avviso. Nessuno disegna lo stato ERROR: senza questo il tondo tornava
+  // ambra e basta, senza dire perche'.
   const handleStartClick = async () => {
     if (isRecordingDisabled || isRecording || isStarting) return;
     setIsStarting(true);
     try {
       await handleRecordingStart();
+    } catch (errore) {
+      toast.error("Non parte", { description: getErrorMessage(errore), duration: 12000 });
     } finally {
       setIsStarting(false);
     }
