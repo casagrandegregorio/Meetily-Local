@@ -290,6 +290,10 @@ export default function Home() {
   // ancora, cioe' in Impostazioni, «Prova il microfono».
   const livelli = useLivelliRegistrazione(momento.tipo === "registra");
 
+  // la schermata in allarme: solo mentre registra, e solo se la sentinella
+  // dice che non sta entrando niente
+  const inAllarme = momento.tipo === "registra" && momento.silenzio != null;
+
   // TRASCRIVI: lancia il lavoro e libera la scheda; se il backend dice di no
   // (manca `uv`, o non sa dove sono gli script) lo dice in un avviso.
   // «Butta» mette la cartella nel Cestino di Windows, dopo la conferma
@@ -329,7 +333,15 @@ export default function Home() {
         onLoadPreview={loadMeetingTranscripts}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Quando la sentinella non sente niente diventa rossa tutta la
+          schermata, e respira (galleria 20, il 2 col 3, scelto il 24-09): un
+          filo rosso attorno alla scheda, con Teams a tutto schermo, non si
+          vedeva. La colonna di sinistra resta com'e'. */}
+      <div
+        className={`flex min-h-0 flex-1 flex-col overflow-hidden ${
+          inAllarme ? "allarme-respira" : ""
+        }`}
+      >
         <AnimatePresence mode="wait">
           <motion.div
             key={momento.tipo}

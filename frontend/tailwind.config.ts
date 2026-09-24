@@ -70,6 +70,13 @@ export default {
         },
         // L'azzurro della fila di barrette dell'audio del PC (galleria 19, B3).
         audiopc: "hsl(var(--audiopc))",
+        // I rossi dell'allarme «non sento niente» (galleria 20).
+        allarme: {
+          DEFAULT: "hsl(var(--allarme))",
+          scheda: "hsl(var(--allarme-scheda))",
+          foreground: "hsl(var(--allarme-foreground))",
+          muted: "hsl(var(--allarme-muted))",
+        },
         // Il foglio chiaro su cui si legge una trascrizione.
         foglio: {
           DEFAULT: "hsl(var(--foglio))",

@@ -27,10 +27,12 @@ interface SchedaRiunioneProps {
 /**
  * La cornice della scheda: figura a sinistra, colonna di testo a destra.
  *
- * Con `allarme` la scheda intera prende un filo rosso attorno: e' il segnale
- * della sentinella del silenzio (galleria 19, A3). Prima c'era solo una riga
- * di testo rossa sotto le barrette, e Greg, provandola il 24-09, non l'ha
- * riconosciuta come un avviso.
+ * Con `allarme` la scheda si tinge di rosso scuro e sta dentro una schermata
+ * rossa che respira: e' il segnale della sentinella del silenzio (galleria 20,
+ * il 2 col 3). Ci si e' arrivati per gradi, nello stesso giorno: prima una riga
+ * di testo rossa sotto le barrette, che provandola Greg non ha riconosciuto
+ * come un avviso; poi un filo rosso attorno alla scheda (galleria 19, A3), che
+ * con Teams a tutto schermo si vede ancora troppo poco.
  */
 function Scheda({
   figura,
@@ -43,8 +45,8 @@ function Scheda({
 }) {
   return (
     <div
-      className={`flex w-117.5 max-w-full items-center gap-6 rounded-2xl border bg-card px-7 py-6 ${
-        allarme ? "border-destructive ring-2 ring-destructive" : "border-border"
+      className={`flex w-117.5 max-w-full items-center gap-6 rounded-2xl border px-7 py-6 ${
+        allarme ? "border-transparent bg-allarme-scheda" : "border-border bg-card"
       }`}
     >
       {figura}
@@ -245,26 +247,36 @@ export function SchedaRiunione({
     case "ferma":
       return <SchedaFerma onStart={onStart} isStarting={isStarting} />;
 
-    case "registra":
-      return (
-        // quando la sentinella non sente niente va in allarme tutta la scheda,
-        // non una riga sola: la riga rossa sotto le barrette non si vedeva
-        // (galleria 19, A3, scelta il 24-09)
-        <Scheda figura={<Tondone testo="STOP" onClick={onStop} />} allarme={momento.silenzio != null}>
-          <div className="text-[38px] leading-none font-light tabular-nums">
-            {momento.secondi === null ? "00:00" : orario(momento.secondi)}
-          </div>
-          <DueLivelliBarre livelli={livelli} />
-          {momento.silenzio != null && (
-            <div className="rounded-lg bg-destructive px-3.5 py-2.5 text-destructive-foreground">
-              <div className="text-sm font-semibold">
-                Non sento niente da {durata(Math.round(momento.silenzio / 60))}
-              </div>
-              <div className="text-xs opacity-85">Controlla il microfono e l&apos;audio del PC</div>
+    case "registra": {
+      const tempo = momento.secondi === null ? "00:00" : orario(momento.secondi);
+      // Quando la sentinella non sente niente la scheda smette di essere il
+      // cronometro e diventa il messaggio: via le barrette (sono spente, non
+      // hanno niente da dire), la scritta grande, e il tempo che resta
+      // leggibile piu' piccolo sotto. Il tondo STOP non si sposta mai.
+      if (momento.silenzio != null)
+        return (
+          <Scheda figura={<Tondone testo="STOP" onClick={onStop} />} allarme>
+            <div className="text-[34px] leading-[1.1] font-extrabold text-allarme-foreground">
+              NON SENTO
+              <br />
+              NIENTE
             </div>
-          )}
+            <div className="text-[15px] text-allarme-muted">
+              Da {durata(Math.round(momento.silenzio / 60))}. Controlla il microfono e l&apos;audio
+              del PC.
+            </div>
+            <div className="text-[22px] leading-none font-light tabular-nums text-allarme-foreground">
+              {tempo}
+            </div>
+          </Scheda>
+        );
+      return (
+        <Scheda figura={<Tondone testo="STOP" onClick={onStop} />}>
+          <div className="text-[38px] leading-none font-light tabular-nums">{tempo}</div>
+          <DueLivelliBarre livelli={livelli} />
         </Scheda>
       );
+    }
 
     case "registrata":
       return (

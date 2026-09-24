@@ -67,6 +67,32 @@
     animation: fade-in-up 0.5s ease-out forwards;
 }
 
+/* Il respiro dell'allarme: la schermata rossa che si accende e si spegne
+   lentamente (galleria 20, il 2 col 3). Chi ha chiesto a Windows meno
+   animazioni la vede rossa e ferma: il messaggio non cambia. */
+@keyframes respiro-allarme {
+
+    0%,
+    100% {
+        background-color: hsl(var(--allarme));
+    }
+
+    50% {
+        background-color: hsl(var(--allarme-picco));
+    }
+}
+
+.allarme-respira {
+    background-color: hsl(var(--allarme));
+    animation: respiro-allarme 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .allarme-respira {
+        animation: none;
+    }
+}
+
 .delay-75 {
     animation-delay: 75ms;
 }
@@ -125,6 +151,16 @@
            dall'ambra anche a barretta sottile, e come l'ambra regge sul
            chiaro e sullo scuro. E' l'unico posto dove entra. */
         --audiopc: 206 74% 63%;
+        /* l'allarme della sentinella del silenzio (galleria 20, il 2 col 3,
+           scelto il 24-09): tutta la schermata diventa rossa e respira, e la
+           scheda diventa il messaggio. Sono rossi fissi, uguali sul chiaro e
+           sullo scuro: un allarme non cambia colore col tema. #8d1f1f che
+           respira fino a #c22a2a, scheda #5e1414, testo bianco e #f6d6d6. */
+        --allarme: 0 64% 34%;
+        --allarme-picco: 0 64% 46%;
+        --allarme-scheda: 0 65% 22%;
+        --allarme-foreground: 0 0% 100%;
+        --allarme-muted: 0 64% 90%;
         /* il foglio chiaro su cui si legge una trascrizione (galleria 10,
            numero 1): carta #f6f4f0, testo #1c1b19, nomi e orari #8a837a.
            E' carta anche nel tema scuro, per questo sta solo qui. */
