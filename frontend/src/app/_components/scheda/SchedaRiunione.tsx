@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 
+import { NIENTE, type DueLivelli } from "@/hooks/useLivelliRegistrazione";
 import { minutiRestanti, type Momento } from "@/types/momento";
 import { durata } from "@/types/trascritta";
 import { orario } from "@/types/trascrizione";
@@ -10,8 +11,8 @@ import { SchedaFerma } from "./SchedaFerma";
 
 interface SchedaRiunioneProps {
   momento: Momento;
-  /** barrette del livello audio mentre registra, valori 0..1 */
-  livelli?: number[];
+  /** le due file di barrette mentre registra, valori 0..1 */
+  livelli?: DueLivelli;
   onStart: () => void;
   isStarting: boolean;
   onStop: () => void;
@@ -23,10 +24,29 @@ interface SchedaRiunioneProps {
 /* ------------------------------------------------------------------ */
 /* I pezzi della scheda: la cornice, e le tre figure che stanno a sinistra */
 
-/** La cornice della scheda: figura a sinistra, colonna di testo a destra. */
-function Scheda({ figura, children }: { figura: ReactNode; children: ReactNode }) {
+/**
+ * La cornice della scheda: figura a sinistra, colonna di testo a destra.
+ *
+ * Con `allarme` la scheda intera prende un filo rosso attorno: e' il segnale
+ * della sentinella del silenzio (galleria 19, A3). Prima c'era solo una riga
+ * di testo rossa sotto le barrette, e Greg, provandola il 24-09, non l'ha
+ * riconosciuta come un avviso.
+ */
+function Scheda({
+  figura,
+  allarme = false,
+  children,
+}: {
+  figura: ReactNode;
+  allarme?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex w-117.5 max-w-full items-center gap-6 rounded-2xl border border-border bg-card px-7 py-6">
+    <div
+      className={`flex w-117.5 max-w-full items-center gap-6 rounded-2xl border bg-card px-7 py-6 ${
+        allarme ? "border-destructive ring-2 ring-destructive" : "border-border"
+      }`}
+    >
       {figura}
       <div className="flex min-w-0 flex-1 flex-col gap-2">{children}</div>
     </div>
@@ -145,18 +165,62 @@ function Quadro({
   );
 }
 
-/** Le barrette del livello audio. Senza dati, nove barrette basse e ferme. */
-function Livello({ valori }: { valori: number[] }) {
+/** Una fila di nove barrette. Senza dati, nove barrette basse e ferme. */
+function Fila({
+  valori,
+  colore,
+  verso,
+}: {
+  valori: number[];
+  colore: string;
+  verso: "su" | "giu";
+}) {
   const barre = valori.length > 0 ? valori : Array<number>(9).fill(0.15);
   return (
-    <div className="flex h-8 items-end gap-0.75" aria-hidden>
+    <div
+      className={`flex h-6.5 gap-0.75 ${verso === "su" ? "items-end" : "items-start"}`}
+      aria-hidden
+    >
       {barre.map((v, i) => (
         <i
           key={i}
-          className="block w-1.25 rounded-sm bg-ambra"
+          className={`block w-1.25 rounded-sm ${colore}`}
           style={{ height: `${Math.max(8, Math.min(100, v * 100))}%` }}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * I due livelli mentre registra: il microfono cresce in su dalla linea di
+ * mezzo, l'audio del PC cresce in giu' (galleria 19, B3, scelta il 24-09).
+ *
+ * Due file e non una: fino al 24-09 c'era solo il microfono, e guardando la
+ * scheda non si poteva sapere se la voce degli altri — su Teams arriva
+ * dall'audio del PC — stesse entrando davvero. I nomi stanno scritti sotto per
+ * esteso: la fila si deve poter leggere senza sapere cosa vuol dire un colore.
+ */
+function DueLivelliBarre({ livelli }: { livelli: DueLivelli }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {/* w-fit: la linea di mezzo e' larga quanto le barrette, non quanto la
+          scheda — e' il pavimento da cui le due file crescono */}
+      <div className="flex w-fit flex-col">
+        <Fila valori={livelli.microfono} colore="bg-ambra" verso="su" />
+        <div className="my-0.75 h-px bg-border" />
+        <Fila valori={livelli.audioPc} colore="bg-audiopc" verso="giu" />
+      </div>
+      <div className="flex gap-3.5 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <i className="block size-2 rounded-xs bg-ambra" aria-hidden />
+          microfono
+        </span>
+        <span className="flex items-center gap-1.5">
+          <i className="block size-2 rounded-xs bg-audiopc" aria-hidden />
+          audio del PC
+        </span>
+      </div>
     </div>
   );
 }
@@ -169,7 +233,7 @@ function Livello({ valori }: { valori: number[] }) {
  */
 export function SchedaRiunione({
   momento,
-  livelli = [],
+  livelli = NIENTE,
   onStart,
   isStarting,
   onStop,
@@ -183,15 +247,20 @@ export function SchedaRiunione({
 
     case "registra":
       return (
-        <Scheda figura={<Tondone testo="STOP" onClick={onStop} />}>
+        // quando la sentinella non sente niente va in allarme tutta la scheda,
+        // non una riga sola: la riga rossa sotto le barrette non si vedeva
+        // (galleria 19, A3, scelta il 24-09)
+        <Scheda figura={<Tondone testo="STOP" onClick={onStop} />} allarme={momento.silenzio != null}>
           <div className="text-[38px] leading-none font-light tabular-nums">
             {momento.secondi === null ? "00:00" : orario(momento.secondi)}
           </div>
-          <Livello valori={livelli} />
+          <DueLivelliBarre livelli={livelli} />
           {momento.silenzio != null && (
-            <div className="text-sm font-medium text-destructive">
-              Non sento niente da {durata(Math.round(momento.silenzio / 60))}: controlla microfono e
-              audio del PC
+            <div className="rounded-lg bg-destructive px-3.5 py-2.5 text-destructive-foreground">
+              <div className="text-sm font-semibold">
+                Non sento niente da {durata(Math.round(momento.silenzio / 60))}
+              </div>
+              <div className="text-xs opacity-85">Controlla il microfono e l&apos;audio del PC</div>
             </div>
           )}
         </Scheda>

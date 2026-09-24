@@ -14,6 +14,7 @@ use super::audio_processing::{
     audio_to_mono, HighPassFilter, LoudnessNormalizer, NoiseSuppressionProcessor,
 };
 use super::devices::AudioDevice;
+use super::misura_livelli::MisuraLivelli;
 use super::recording_state::{AudioChunk, AudioError, DeviceType, RecordingState};
 use super::vad::ContinuousVadProcessor;
 
@@ -744,6 +745,9 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // I due livelli per le barrette della scheda, presi dove le sorgenti sono
+    // ancora separate (24-09). La mette il manager, come il sender qui sopra.
+    misura_livelli: Option<MisuraLivelli>,
 }
 
 impl AudioPipeline {
@@ -843,6 +847,7 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None, // Will be set by manager
+            misura_livelli: None,             // idem: la mette il manager
         }
     }
 
@@ -923,6 +928,12 @@ impl AudioPipeline {
                             // STEP 3: Source-tagged VAD on each stream independently
                             self.run_vad_for_source(&mic_window, DeviceType::Microphone);
                             self.run_vad_for_source(&sys_window, DeviceType::System);
+
+                            // Le barrette della scheda: qui le due sorgenti
+                            // sono ancora separate, dopo il mescolatore no.
+                            if let Some(misura) = self.misura_livelli.as_mut() {
+                                misura.ascolta(&mic_window, &sys_window);
+                            }
 
                             // STEP 4: Mix for the recording WAV (unchanged behavior)
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
@@ -1053,6 +1064,8 @@ fn source_label(source: DeviceType) -> &'static str {
 pub struct AudioPipelineManager {
     pipeline_handle: Option<JoinHandle<Result<()>>>,
     audio_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    /// I due livelli per la scheda, da mettere prima di `start`
+    misura_livelli: Option<MisuraLivelli>,
 }
 
 impl AudioPipelineManager {
@@ -1060,7 +1073,14 @@ impl AudioPipelineManager {
         Self {
             pipeline_handle: None,
             audio_sender: None,
+            misura_livelli: None,
         }
+    }
+
+    /// Chi misura i due livelli mentre registra. Va messo prima di `start`:
+    /// da li' in poi la misura vive dentro la catena.
+    pub fn set_misura_livelli(&mut self, misura: MisuraLivelli) {
+        self.misura_livelli = Some(misura);
     }
 
     /// Start the audio pipeline with device information for adaptive buffering
@@ -1108,6 +1128,7 @@ impl AudioPipelineManager {
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
         pipeline.recording_sender_for_mixed = recording_sender;
+        pipeline.misura_livelli = self.misura_livelli.take();
 
         let handle = tokio::spawn(async move { pipeline.run().await });
 

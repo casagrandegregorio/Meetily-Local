@@ -49,6 +49,30 @@ function emettiFinto(event: string, payload: unknown) {
   }
 }
 
+/**
+ * I due livelli finti per le barrette della scheda (`livelli-registrazione`),
+ * dieci volte al secondo, finche' qualcuno li ascolta: nel browser il motore
+ * non c'e', e senza questi le due file starebbero ferme e non si vedrebbe se
+ * il disegno funziona. Il microfono fa onde piu' larghe dell'audio del PC,
+ * cosi' le due file non sembrano la stessa cosa.
+ */
+function avviaLivelliFinti() {
+  let passo = 0;
+  setInterval(() => {
+    const ascoltato = [...ascoltatoriFinti.values()].some(
+      (a) => a.event === "livelli-registrazione",
+    );
+    if (!ascoltato) return;
+    passo += 1;
+    const onda = (periodo: number, ampiezza: number) =>
+      ampiezza * (0.5 + 0.5 * Math.sin((passo / periodo) * Math.PI * 2)) * (0.6 + Math.random() * 0.4);
+    emettiFinto("livelli-registrazione", {
+      microfono: onda(13, 0.09),
+      audio_pc: onda(31, 0.06),
+    });
+  }, 100);
+}
+
 /** La cartella che Meetily creerebbe adesso: `Meeting AAAA-MM-GG_hh-mm-ss_...`. */
 function cartellaFintaDiAdesso(): string {
   const d = new Date();
@@ -434,5 +458,6 @@ export function installaTauriFinto() {
   };
 
   (window as any).__TAURI__ = { window: { getCurrentWindow: () => finestraFinta } };
+  avviaLivelliFinti();
   console.info("[tauri finto] installato: interfaccia visibile nel browser");
 }

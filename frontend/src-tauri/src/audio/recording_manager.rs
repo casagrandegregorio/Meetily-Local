@@ -455,6 +455,12 @@ impl RecordingManager {
         self.recording_saver.set_sentinella(sentinella);
     }
 
+    /// Chi misura i due livelli (microfono e audio del PC) per le barrette
+    /// della scheda, da mettere prima di `start_recording`.
+    pub fn set_misura_livelli(&mut self, misura: super::misura_livelli::MisuraLivelli) {
+        self.pipeline_manager.set_misura_livelli(misura);
+    }
+
     /// Set error callback for handling errors
     pub fn set_error_callback<F>(&self, callback: F)
     where

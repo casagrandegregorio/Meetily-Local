@@ -68,6 +68,8 @@ export default {
           DEFAULT: "hsl(var(--ambra))",
           foreground: "hsl(var(--ambra-foreground))",
         },
+        // L'azzurro della fila di barrette dell'audio del PC (galleria 19, B3).
+        audiopc: "hsl(var(--audiopc))",
         // Il foglio chiaro su cui si legge una trascrizione.
         foglio: {
           DEFAULT: "hsl(var(--foglio))",

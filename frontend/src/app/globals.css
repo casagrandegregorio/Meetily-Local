@@ -120,6 +120,11 @@
            chiaro sia sullo scuro. */
         --ambra: 36 79% 57%;
         --ambra-foreground: 40 94% 7%;
+        /* l'azzurro dell'audio del PC: la seconda fila di barrette mentre
+           registra (galleria 19, B3). #5aa9e6, scelto perche' si stacca
+           dall'ambra anche a barretta sottile, e come l'ambra regge sul
+           chiaro e sullo scuro. E' l'unico posto dove entra. */
+        --audiopc: 206 74% 63%;
         /* il foglio chiaro su cui si legge una trascrizione (galleria 10,
            numero 1): carta #f6f4f0, testo #1c1b19, nomi e orari #8a837a.
            E' carta anche nel tema scuro, per questo sta solo qui. */

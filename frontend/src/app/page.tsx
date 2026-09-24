@@ -31,9 +31,7 @@ import { SettingsModals } from "./_components/SettingsModal";
 // (il testo dal vivo mentre registra: qui non c'e', deciso da Greg). Restano
 // nel repo, non montati.
 import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
-import { useAudioLevels } from "@/hooks/useAudioLevels";
-import { useBarrette } from "@/hooks/useBarrette";
-import { usePreferenzeRegistrazione } from "@/hooks/usePreferenzeRegistrazione";
+import { useLivelliRegistrazione } from "@/hooks/useLivelliRegistrazione";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
@@ -228,15 +226,6 @@ export default function Home() {
   }, []);
 
 
-  // Le barrette del livello mentre registra: il microfono scelto nel file
-  // delle preferenze, o «default», il nome che il monitor risolve da solo.
-  // Fuori dalla registrazione il monitor sta spento.
-  const { prefs } = usePreferenzeRegistrazione();
-  const nomiDaAscoltare = isRecording
-    ? [prefs?.preferred_mic_device ?? "default"]
-    : null;
-  const livelliAudio = useAudioLevels(nomiDaAscoltare);
-  const livelli = useBarrette(livelliAudio);
 
   // La sentinella del silenzio del motore (`sentinella_silenzio.rs`): dopo un
   // minuto e mezzo senza niente sopra il silenzio manda `registrazione-muta`
@@ -258,7 +247,7 @@ export default function Home() {
           toast.error("Non sento niente", {
             id: "registrazione-muta",
             description:
-              "Piu' di un minuto e mezzo senza suono: controlla il microfono e l'audio del PC.",
+              "Negli ultimi 90 secondi non e' entrato quasi niente: controlla il microfono e l'audio del PC.",
             duration: Infinity,
           });
         });
@@ -292,6 +281,14 @@ export default function Home() {
   // e' la galleria 5 dal vivo. Nell'app vera questa riga non fa niente.
   const momentoChiesto = useMomentoFinto();
   const momento = momentoChiesto ?? momentoVero;
+
+  // Le due file di barrette mentre registra: microfono e audio del PC, mandate
+  // dal motore dall'interno della registrazione (`misura_livelli.rs`), dove le
+  // due sorgenti sono ancora separate. Fino al 24-09 qui si accendeva il
+  // monitor dei livelli sul solo microfono: una fila sola, e dell'audio del PC
+  // non si vedeva niente. Il monitor dei livelli resta acceso dove serve
+  // ancora, cioe' in Impostazioni, «Prova il microfono».
+  const livelli = useLivelliRegistrazione(momento.tipo === "registra");
 
   // TRASCRIVI: lancia il lavoro e libera la scheda; se il backend dice di no
   // (manca `uv`, o non sa dove sono gli script) lo dice in un avviso.

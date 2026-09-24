@@ -29,8 +29,9 @@ const VENTISETTE_AGOSTO = "Meeting 2026-08-27_15-02-24_2026-08-27_13-02";
 const MOMENTI_FINTI: Record<string, Momento> = {
   ferma: { tipo: "ferma" },
   registra: { tipo: "registra", secondi: 12 * 60 + 34 },
-  // la sentinella del silenzio che avvisa: 2 minuti e mezzo senza niente
-  "registra-muta": { tipo: "registra", secondi: 12 * 60 + 34, silenzio: 150 },
+  // la sentinella del silenzio che avvisa: i 90 secondi di finestra che ha
+  // guardato, e dentro non c'era quasi niente (la regola nuova del 24-09)
+  "registra-muta": { tipo: "registra", secondi: 12 * 60 + 34, silenzio: 90 },
   registrata: { tipo: "registrata", folder: QUATTRO_SETTEMBRE, minutes: 94 },
   // al 38%, come nella galleria 5: 36 minuti su 94
   trascrive: { tipo: "trascrive", folder: QUATTRO_SETTEMBRE, fatti: 36, totale: 94 },

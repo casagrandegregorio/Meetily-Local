@@ -23,6 +23,7 @@ pub mod device_monitor; // NEW: Device disconnect/reconnect monitoring
 pub mod hardware_detector;
 pub mod incremental_saver; // NEW: Incremental audio saving with checkpoints
 pub mod level_monitor;
+pub mod misura_livelli;
 pub mod pipeline;
 pub mod playback_monitor;
 pub mod post_processor;

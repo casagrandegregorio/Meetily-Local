@@ -24,6 +24,7 @@ use super::{
 
 // Import transcription modules
 use super::devices::DeviceType;
+use super::misura_livelli::MisuraLivelli;
 use super::sentinella_silenzio::SentinellaSilenzio;
 use super::transcription::{self, reset_speech_detected_flag};
 
@@ -149,9 +150,10 @@ pub struct TranscriptionStatus {
 // RECORDING COMMANDS
 // ============================================================================
 
-/// La sentinella del silenzio per questa registrazione: dopo un minuto e
-/// mezzo senza niente sopra il silenzio manda alla pagina l'evento
-/// `registrazione-muta` (coi secondi di silenzio) e una notifica di Windows,
+/// La sentinella del silenzio per questa registrazione: quando negli ultimi
+/// novanta secondi il suono e' stato meno del cinque per cento del tempo manda
+/// alla pagina l'evento `registrazione-muta` (coi secondi guardati) e una
+/// notifica di Windows,
 /// cosi' si vede anche con Teams a tutto schermo; quando torna il suono,
 /// `registrazione-suono`. La notifica va diretta al plugin, non al
 /// NotificationManager di Meetily, che la tace se manca un consenso.
@@ -168,7 +170,7 @@ fn sentinella_per<R: Runtime>(app: &AppHandle<R>) -> SentinellaSilenzio {
                 .notification()
                 .builder()
                 .title("Non sento niente")
-                .body("Sono passati piu' di 90 secondi senza suono: controlla microfono e audio del PC.")
+                .body("Negli ultimi 90 secondi non e' entrato quasi niente: controlla microfono e audio del PC.")
                 .show()
             {
                 warn!("Notifica di Windows non mostrata: {}", e);
@@ -179,6 +181,21 @@ fn sentinella_per<R: Runtime>(app: &AppHandle<R>) -> SentinellaSilenzio {
             let _ = per_suono.emit("registrazione-suono", serde_json::json!({}));
         },
     )
+}
+
+/// I due livelli per le barrette della scheda: dieci volte al secondo manda
+/// alla pagina `livelli-registrazione` con quanto forte entra il microfono e
+/// quanto forte entra l'audio del PC (RMS, 0-1), misurati dove le due sorgenti
+/// sono ancora separate. Prima del 24-09 la scheda mostrava una fila sola, che
+/// era il microfono: dall'audio del PC non si vedeva niente.
+fn misura_per<R: Runtime>(app: &AppHandle<R>) -> MisuraLivelli {
+    let per_livelli = app.clone();
+    MisuraLivelli::new(move |microfono, audio_pc| {
+        let _ = per_livelli.emit(
+            "livelli-registrazione",
+            serde_json::json!({ "microfono": microfono, "audio_pc": audio_pc }),
+        );
+    })
 }
 
 /// Gli apparecchi con cui si registra: una memoria sola, il file delle
@@ -328,6 +345,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
     manager.set_sentinella_silenzio(sentinella_per(&app));
+    manager.set_misura_livelli(misura_per(&app));
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
@@ -450,6 +468,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
     manager.set_sentinella_silenzio(sentinella_per(&app));
+    manager.set_misura_livelli(misura_per(&app));
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
