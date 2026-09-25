@@ -1,7 +1,7 @@
 //! Le registrazioni interrotte: si ricompongono da sole.
 //!
-//! Mentre registra, il motore scrive l'audio a pezzi di trenta secondi in
-//! `.checkpoints/audio_chunk_000.mp4`, `001`, ... e solo allo Stop li unisce in
+//! Mentre registra, il motore scrive l'audio a pezzi (10 secondi dal 25-09,
+//! prima 30) in `.checkpoints/audio_chunk_00000.mp4`, ... e solo allo Stop li unisce in
 //! `audio.mp4`. Se l'app si chiude mentre registra (o cade), nella cartella
 //! restano i pezzi, `metadata.json` con `status: "recording"` e nessun
 //! `audio.mp4`: la riunione non compare da nessuna parte, perche' gli elenchi
@@ -12,7 +12,8 @@
 //! senza ricodificare (lo stesso concat dello Stop, `incremental_saver.rs`),
 //! e `metadata.json` chiuso con `"ricomposta": true`. Poi la riga compare con
 //! la parola «ricomposta». Quello che stava ancora nella memoria del motore
-//! (fino a trenta secondi) e' perso: non e' mai arrivato sul disco.
+//! (fino a un pezzo) e' perso: non e' mai arrivato sul disco. Un pezzo rotto,
+//! in fondo o in mezzo, si salta: meglio un buco di dieci secondi che niente.
 //!
 //! Le guardie, perche' una cartella che sta registrando non va mai toccata:
 //! niente mentre l'app registra; solo `status: "recording"`; e l'ultimo
@@ -30,8 +31,8 @@ const CHECKPOINTS: &str = ".checkpoints";
 const AUDIO: &str = "audio.mp4";
 const PARZIALE: &str = "audio.mp4.part";
 const METADATA: &str = "metadata.json";
-/// quanti secondi di audio ha un pezzo (`incremental_saver.rs`)
-const SECONDI_PER_PEZZO: f64 = 30.0;
+/// quanti secondi di audio ha un pezzo, se non si sa di meglio
+const SECONDI_PER_PEZZO: f64 = crate::audio::incremental_saver::SECONDI_PER_PEZZO as f64;
 /// l'ultimo pezzo deve essere piu' vecchio di cosi', o la cartella e' viva
 const ATTESA: Duration = Duration::from_secs(120);
 
@@ -122,17 +123,21 @@ fn unisci(ffmpeg: &Path, dir: &Path, pezzi: &[PathBuf], uscita: &Path) -> Result
 }
 
 /// Chiude `metadata.json` come una registrazione finita, e dice che e' ricomposta.
-fn chiudi_metadata(dir: &Path, quanti: usize) -> Result<(), String> {
+/// La fine e' l'ora in cui e' stato scritto l'ultimo pezzo usato, se si sa;
+/// altrimenti l'inizio piu' i pezzi per la loro durata.
+fn chiudi_metadata(dir: &Path, quanti: usize, ultimo: Option<SystemTime>) -> Result<(), String> {
     let mut meta = leggi_metadata(dir).unwrap_or_else(|| serde_json::json!({}));
-    let secondi = quanti as f64 * SECONDI_PER_PEZZO;
     let inizio = meta
         .get("created_at")
         .and_then(|s| s.as_str())
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&Utc));
-    let fine = inizio
-        .map(|d| d + chrono::Duration::seconds(secondi as i64))
-        .unwrap_or_else(Utc::now);
+    let stimata = quanti as f64 * SECONDI_PER_PEZZO;
+    let (fine, secondi) = match (inizio, ultimo.map(DateTime::<Utc>::from)) {
+        (Some(a), Some(b)) if b > a => (b, (b - a).num_seconds() as f64),
+        (Some(a), _) => (a + chrono::Duration::seconds(stimata as i64), stimata),
+        (None, _) => (Utc::now(), stimata),
+    };
     if let Some(m) = meta.as_object_mut() {
         m.insert("status".into(), "completed".into());
         m.insert("completed_at".into(), fine.to_rfc3339().into());
@@ -145,27 +150,54 @@ fn chiudi_metadata(dir: &Path, quanti: usize) -> Result<(), String> {
     std::fs::rename(&provvisorio, dir.join(METADATA)).map_err(|e| format!("metadata: {}", e))
 }
 
+/// Se ffmpeg riesce a leggere un pezzo da cima a fondo.
+fn leggibile(ffmpeg: &Path, pezzo: &Path) -> bool {
+    let mut comando = Command::new(ffmpeg);
+    comando
+        .args(["-hide_banner", "-v", "error", "-i"])
+        .arg(pezzo)
+        .args(["-f", "null", "-"]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        comando.creation_flags(CREATE_NO_WINDOW);
+    }
+    comando
+        .output()
+        .map(|o| o.status.success() && o.stderr.is_empty())
+        .unwrap_or(false)
+}
+
 /// Ricompone una cartella: i pezzi in `audio.mp4`, il metadata chiuso, i
-/// pezzi buttati. Se l'ultimo pezzo e' rotto (scritto a meta' quando l'app
-/// e' caduta) si riprova senza. Dice quanti pezzi ha usato.
+/// pezzi buttati. Se l'unione di tutti non riesce, si prova un pezzo alla
+/// volta e si tengono solo quelli leggibili: di solito e' l'ultimo, scritto a
+/// meta' quando l'app e' caduta, ma puo' essere uno in mezzo. Dice quanti
+/// pezzi ha usato.
 fn ricomponi(ffmpeg: &Path, dir: &Path) -> Result<usize, String> {
     let tutti = pezzi(dir);
     let parziale = dir.join(PARZIALE);
-    let usati = match unisci(ffmpeg, dir, &tutti, &parziale) {
-        Ok(()) => tutti.len(),
-        Err(primo) if tutti.len() > 1 => {
-            log::warn!("Ricomposizione di {:?}: {} — riprovo senza l'ultimo pezzo", dir, primo);
-            unisci(ffmpeg, dir, &tutti[..tutti.len() - 1], &parziale)?;
-            tutti.len() - 1
+    let usati: Vec<PathBuf> = match unisci(ffmpeg, dir, &tutti, &parziale) {
+        Ok(()) => tutti,
+        Err(primo) => {
+            log::warn!("Ricomposizione di {:?}: {} — provo i pezzi uno per uno", dir, primo);
+            let buoni: Vec<PathBuf> = tutti.into_iter().filter(|p| leggibile(ffmpeg, p)).collect();
+            if buoni.is_empty() {
+                return Err(format!("nessun pezzo leggibile ({})", primo));
+            }
+            unisci(ffmpeg, dir, &buoni, &parziale)?;
+            buoni
         }
-        Err(primo) => return Err(primo),
     };
+    let ultimo = usati
+        .last()
+        .and_then(|p| std::fs::metadata(p).ok()?.modified().ok());
     std::fs::rename(&parziale, dir.join(AUDIO)).map_err(|e| format!("audio.mp4: {}", e))?;
-    chiudi_metadata(dir, usati)?;
+    chiudi_metadata(dir, usati.len(), ultimo)?;
     if let Err(e) = std::fs::remove_dir_all(dir.join(CHECKPOINTS)) {
         log::warn!("Pezzi di {:?} non buttati: {}", dir, e);
     }
-    Ok(usati)
+    Ok(usati.len())
 }
 
 /// Guarda tutte le cartelle sotto `radice` e ricompone le interrotte. Non fa
@@ -219,7 +251,7 @@ mod prove {
         )
         .unwrap();
         for i in 0..pezzi {
-            std::fs::write(dir.join(CHECKPOINTS).join(format!("audio_chunk_{:03}.mp4", i)), b"x").unwrap();
+            std::fs::write(dir.join(CHECKPOINTS).join(format!("audio_chunk_{:05}.mp4", i)), b"x").unwrap();
         }
         if con_audio {
             std::fs::write(dir.join(AUDIO), b"x").unwrap();
@@ -262,13 +294,24 @@ mod prove {
     }
 
     #[test]
-    fn il_metadata_si_chiude_con_la_durata() {
+    fn il_metadata_si_chiude_con_l_ora_dell_ultimo_pezzo() {
         let dir = cartella("metadata", "recording", 9, false);
-        chiudi_metadata(&dir, 9).unwrap();
+        // l'ultimo pezzo scritto 4 minuti e mezzo dopo l'inizio (08:24:28)
+        let ultimo = SystemTime::UNIX_EPOCH
+            + Duration::from_secs(DateTime::parse_from_rfc3339("2026-09-25T08:28:58Z").unwrap().timestamp() as u64);
+        chiudi_metadata(&dir, 9, Some(ultimo)).unwrap();
         let m = leggi_metadata(&dir).unwrap();
         assert_eq!(m["status"], "completed");
         assert_eq!(m["duration_seconds"], 270.0);
         assert_eq!(m["ricomposta"], true);
         assert!(m["completed_at"].as_str().unwrap().starts_with("2026-09-25T08:28:58"));
+    }
+
+    #[test]
+    fn senza_l_ora_dell_ultimo_pezzo_si_stima() {
+        let dir = cartella("stima", "recording", 6, false);
+        chiudi_metadata(&dir, 6, None).unwrap();
+        let m = leggi_metadata(&dir).unwrap();
+        assert_eq!(m["duration_seconds"], 6.0 * SECONDI_PER_PEZZO);
     }
 }

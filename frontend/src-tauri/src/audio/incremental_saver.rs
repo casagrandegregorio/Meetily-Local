@@ -14,7 +14,12 @@ struct AudioData {
     // sample_rate: u32,
 }
 
-/// Incremental audio saver that writes checkpoints every 30 seconds
+/// Quanti secondi di audio ha un pezzo in `.checkpoints`. Era 30 (Meetily);
+/// dal 25-09 e' 10: se l'app cade, si perde al massimo quello che era ancora
+/// in memoria, cioe' un pezzo (`ricomponi.rs` rimette insieme il resto).
+pub const SECONDI_PER_PEZZO: usize = 10;
+
+/// Incremental audio saver that writes checkpoints every `SECONDI_PER_PEZZO` seconds
 /// to minimize memory usage and enable crash recovery
 pub struct IncrementalAudioSaver {
     checkpoint_buffer: Vec<AudioData>,
@@ -44,7 +49,7 @@ impl IncrementalAudioSaver {
 
         Ok(Self {
             checkpoint_buffer: Vec::new(),
-            checkpoint_interval_samples: sample_rate as usize * 30, // 30 seconds
+            checkpoint_interval_samples: sample_rate as usize * SECONDI_PER_PEZZO,
             checkpoint_count: 0,
             checkpoints_dir,
             meeting_folder,
@@ -92,7 +97,7 @@ impl IncrementalAudioSaver {
         // Generate checkpoint filename
         let checkpoint_path = self
             .checkpoints_dir
-            .join(format!("audio_chunk_{:03}.mp4", self.checkpoint_count));
+            .join(format!("audio_chunk_{:05}.mp4", self.checkpoint_count));
 
         // Encode and save checkpoint
         encode_single_audio(
@@ -168,7 +173,7 @@ impl IncrementalAudioSaver {
         for i in 0..self.checkpoint_count {
             let checkpoint_path = self
                 .checkpoints_dir
-                .join(format!("audio_chunk_{:03}.mp4", i));
+                .join(format!("audio_chunk_{:05}.mp4", i));
 
             // Verify checkpoint exists
             if !checkpoint_path.exists() {
@@ -314,7 +319,7 @@ pub async fn recover_audio_from_checkpoints(
     checkpoint_files.sort_by_key(|entry| entry.path());
 
     let chunk_count = checkpoint_files.len() as u32;
-    let estimated_duration = (chunk_count as f64) * 30.0; // 30 seconds per chunk
+    let estimated_duration = (chunk_count as f64) * SECONDI_PER_PEZZO as f64;
 
     info!(
         "Found {} checkpoint files, estimated duration: {:.2}s",
@@ -468,8 +473,8 @@ mod tests {
 
         let mut saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000).unwrap();
 
-        // Add 60 seconds worth of audio (should create 2 checkpoints)
-        for i in 0..120 {
+        // Two pieces' worth of audio (should create 2 checkpoints)
+        for i in 0..(SECONDI_PER_PEZZO * 4) {
             // 120 chunks of 0.5s each
             let chunk = AudioChunk {
                 data: vec![0.5f32; 24000], // 0.5s at 48kHz
