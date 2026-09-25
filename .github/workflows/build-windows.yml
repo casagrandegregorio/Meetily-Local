@@ -35,6 +35,12 @@ concurrency:
 env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
+  # Keep ggml off the build machine's own CPU features — see
+  # cmake/portable-cpu.cmake for the full rationale. whisper-rs-sys forwards
+  # GGML_*-prefixed environment variables straight to CMake; llama-cpp-sys-2
+  # forwards only CMAKE_*, and is covered by CMAKE_TOOLCHAIN_FILE (set below,
+  # once the workspace path is known).
+  GGML_NATIVE: "OFF"
 
 jobs:
   build-windows:
@@ -48,6 +54,19 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Pin the CPU baseline for ggml builds
+        shell: pwsh
+        run: |
+          # CMake wants forward slashes; $env:GITHUB_WORKSPACE is backslashed on Windows.
+          $toolchain = (Join-Path $env:GITHUB_WORKSPACE 'cmake/portable-cpu.cmake') -replace '\\', '/'
+          if (-not (Test-Path $toolchain)) {
+            Write-Error "Toolchain file not found: $toolchain"
+            exit 1
+          }
+          "CMAKE_TOOLCHAIN_FILE=$toolchain" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "CMAKE_TOOLCHAIN_FILE=$toolchain"
+          Get-Content $toolchain | Where-Object { $_ -match '^set\(' }
 
       - name: Get version from tauri.conf.json
         id: get-version
@@ -509,7 +528,12 @@ jobs:
           # dropped them while keeping the build-script fingerprint, so the
           # next build linked against a directory that no longer existed
           # (LNK1181 on sherpa-onnx-c-api.lib).
-          key: windows-x64-cpu-v3
+          # v4: forces a rebuild of whisper-rs-sys / llama-cpp-sys-2 under the
+          # pinned AVX2 baseline. Their build scripts do not emit
+          # cargo:rerun-if-env-changed for GGML_*/CMAKE_*, so a cached v3
+          # artifact (possibly compiled with /arch:AVX512) would be reused and
+          # the pinning would silently do nothing.
+          key: windows-x64-cpu-v4
           cache-directories: |
             target/sherpa-onnx-prebuilt
 
@@ -704,6 +728,43 @@ jobs:
         with:
           projectPath: frontend
           args: --target x86_64-pc-windows-msvc ${{ steps.build-profile.outputs.args }}
+
+      - name: Verify the compiled CPU baseline (no AVX-512)
+        shell: pwsh
+        run: |
+          # whisper-rs-sys builds with very_verbose, so each sys crate's build
+          # script log holds the exact compiler flags ggml was built with.
+          # Fail loudly here rather than shipping an installer that dies with
+          # STATUS_ILLEGAL_INSTRUCTION on any CPU without AVX-512.
+          $logs = Get-ChildItem -Path . -Recurse -Filter output -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match 'whisper-rs-sys|llama-cpp-sys-2' }
+
+          if (-not $logs) {
+            Write-Error "No build-script logs found for whisper-rs-sys / llama-cpp-sys-2 - the check cannot verify anything, so it fails on purpose."
+            exit 1
+          }
+
+          $bad = @()
+          $good = @()
+          foreach ($log in $logs) {
+            $text = Get-Content $log.FullName -Raw
+            $crate = Split-Path (Split-Path $log.FullName -Parent) -Leaf
+            if ($text -match '/arch:AVX512') { $bad += $crate }
+            if ($text -match '/arch:AVX2')   { $good += $crate }
+            $variant = [regex]::Matches($text, 'Adding CPU backend variant[^\r\n]*') |
+                       ForEach-Object { $_.Value } | Select-Object -First 1
+            Write-Host "$crate :: $variant"
+          }
+
+          if ($bad.Count -gt 0) {
+            Write-Error "AVX-512 leaked into: $($bad -join ', '). GGML_NATIVE pinning is not taking effect (check cmake/portable-cpu.cmake and the rust-cache key)."
+            exit 1
+          }
+          if ($good.Count -eq 0) {
+            Write-Error "No /arch:AVX2 found in any ggml build log - the instruction baseline is not what we think it is."
+            exit 1
+          }
+          Write-Host "OK: ggml backends compiled with /arch:AVX2, no AVX-512."
 
       - name: Verify build artifacts
         shell: bash
