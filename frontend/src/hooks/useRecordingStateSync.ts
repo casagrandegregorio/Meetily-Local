@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { recordingService } from "@/services/recordingService";
 
 interface UseRecordingStateSyncReturn {
@@ -38,7 +39,12 @@ export function useRecordingStateSync(
       }
     };
 
-    if (typeof window !== "undefined" && (window as any).__TAURI__) {
+    // `isTauri()`, non `window.__TAURI__`: quello esiste solo con
+    // `withGlobalTauri`, che qui e' spento — nell'app vera questo controllo
+    // non partiva mai (lo metteva solo il finto). Cosi' tornando su Registra
+    // durante una registrazione la scheda diceva «Pronta» e REGISTRA
+    // rispondeva «already in progress» (25-09).
+    if (isTauri()) {
       checkRecordingState();
 
       const interval = setInterval(checkRecordingState, 1000);

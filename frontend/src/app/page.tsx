@@ -53,7 +53,10 @@ export default function Home() {
   // this in sync with the global recording-state context (the "page only
   // updates after a successful Tauri response" semantic that several
   // call-sites depend on).
-  const [isRecording, setIsRecordingState] = useState(false);
+  // Parte da quello che sa il contesto globale, che vive sopra le pagine:
+  // tornando su Registra durante una registrazione la scheda e' subito quella
+  // con lo STOP (25-09: cambiando pagina la registrazione «spariva»).
+  const [isRecording, setIsRecordingState] = useState(recordingState.isRecording);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
