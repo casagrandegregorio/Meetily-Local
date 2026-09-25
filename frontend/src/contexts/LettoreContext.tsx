@@ -86,9 +86,13 @@ export function LettoreProvider({ children }: { children: ReactNode }) {
       setErrore(null);
       setTempo(0);
       setDurata(0);
+      // la riunione nuova diventa «quella del lettore» prima di chiedere il
+      // file: se il file non c'e', l'errore si vede sulla sua riga (fino al
+      // 25-09 restava attaccato alla riunione di prima e il ▶ taceva)
+      a.pause();
+      setFolder(nuovo);
       const percorso = await invoke<string>(COMANDO_AUDIO, { folder: nuovo });
       a.src = convertFileSrc(percorso);
-      setFolder(nuovo);
     },
     [folder, errore],
   );

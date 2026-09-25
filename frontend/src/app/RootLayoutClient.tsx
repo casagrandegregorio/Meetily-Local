@@ -24,6 +24,7 @@ import { SidebarProvider } from "@/components/Sidebar/SidebarProvider";
 import { ImportDialogProvider } from "@/contexts/ImportDialogContext";
 import { LavoriProvider } from "@/contexts/LavoriContext";
 import { LettoreProvider } from "@/contexts/LettoreContext";
+import { SentinellaProvider } from "@/contexts/SentinellaContext";
 
 import { TitleBar } from "@/components/TitleBar";
 // `TauriThemeSync` seguiva il tema di Windows e su un PC chiaro spegneva lo
@@ -40,6 +41,8 @@ import { FileDropBridge } from "@/components/bridges/FileDropBridge";
 // Outer-to-inner. Each provider may consume the providers above it.
 const PROVIDERS = [
   RecordingStateProvider,
+  // la sentinella del silenzio, sopra le pagine (25-09)
+  SentinellaProvider,
   TranscriptProvider,
   ConfigProvider,
   OllamaDownloadProvider,

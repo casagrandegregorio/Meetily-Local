@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { listen } from "@tauri-apps/api/event";
@@ -36,6 +36,7 @@ import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
 import { useLettore } from "@/contexts/LettoreContext";
+import { useSentinella } from "@/contexts/SentinellaContext";
 import { RigaLavoro } from "./_components/scheda/RigaLavoro";
 import { COMANDO_CESTINO } from "@/types/arretrata";
 
@@ -230,54 +231,9 @@ export default function Home() {
 
 
 
-  // La sentinella del silenzio del motore (`sentinella_silenzio.rs`): dopo un
-  // minuto e mezzo senza niente sopra il silenzio manda `registrazione-muta`
-  // coi secondi, e `registrazione-suono` quando torna qualcosa. Qui: la
-  // scheda lo scrive e un avviso resta finche' non si chiude. La notifica di
-  // Windows la manda il motore da solo, per chi sta su Teams a tutto schermo.
-  // Si tiene il secondo del cronometro in cui il silenzio e' cominciato
-  // (l'avviso arriva coi secondi gia' guardati), cosi' la scheda dice da
-  // quanto e il numero cresce col cronometro: fino al 25-09 restava fermo a
-  // «Da 2 min» (90 s arrotondati).
-  const cronometro = useRef(0);
-  useEffect(() => {
-    cronometro.current = recordingState.recordingDuration ?? 0;
-  }, [recordingState.recordingDuration]);
-  const [mutaDal, setMutaDal] = useState<number | null>(null);
-  const silenzio =
-    mutaDal == null ? null : Math.max(0, (recordingState.recordingDuration ?? 0) - mutaDal);
-  useEffect(() => {
-    if (!isRecording) {
-      setMutaDal(null);
-      return;
-    }
-    let viaMuta: (() => void) | undefined;
-    let viaSuono: (() => void) | undefined;
-    (async () => {
-      try {
-        viaMuta = await listen<{ secondi: number }>("registrazione-muta", (e) => {
-          setMutaDal(cronometro.current - e.payload.secondi);
-          toast.error("Non sento niente", {
-            id: "registrazione-muta",
-            description:
-              "Negli ultimi 90 secondi non e' entrato quasi niente: controlla il microfono e l'audio del PC.",
-            duration: Infinity,
-          });
-        });
-        viaSuono = await listen("registrazione-suono", () => {
-          setMutaDal(null);
-          toast.dismiss("registrazione-muta");
-        });
-      } catch (errore) {
-        console.error("Sentinella del silenzio non ascoltabile:", errore);
-      }
-    })();
-    return () => {
-      viaMuta?.();
-      viaSuono?.();
-      toast.dismiss("registrazione-muta");
-    };
-  }, [isRecording]);
+  // La sentinella del silenzio vive sopra le pagine (`SentinellaContext`,
+  // dal 25-09): cambiando pagina l'allarme non si perde.
+  const { silenzio } = useSentinella();
 
   // Il momento della scheda, letto dallo stato vero: ferma, registra, e dopo
   // lo Stop «registrata» finche' non si preme TRASCRIVI. Poi la scheda torna

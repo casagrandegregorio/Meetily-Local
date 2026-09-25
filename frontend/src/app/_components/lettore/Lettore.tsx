@@ -95,7 +95,13 @@ export function LettoreRiga({ folder }: { folder: string }) {
           onClick={(e) => e.stopPropagation()}
         >
           <Asta frazione={frazione} larghezza="w-30" onSalta={(f) => void l.salta(folder, f * l.durata)} />
-          {tempoScritto(l.tempo)}
+          {l.errore ? (
+            <span className="text-destructive" title={l.errore}>
+              audio non leggibile
+            </span>
+          ) : (
+            tempoScritto(l.tempo)
+          )}
         </span>
       )}
     </span>
