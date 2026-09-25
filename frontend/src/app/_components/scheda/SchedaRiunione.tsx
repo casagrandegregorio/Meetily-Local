@@ -262,7 +262,7 @@ export function SchedaRiunione({
               NIENTE
             </div>
             <div className="text-[15px] text-allarme-muted">
-              Da {durata(Math.round(momento.silenzio / 60))}. Controlla il microfono e l&apos;audio
+              Da {durata(Math.floor(momento.silenzio / 60))}. Controlla il microfono e l&apos;audio
               del PC.
             </div>
             <div className="text-[22px] leading-none font-light tabular-nums text-allarme-foreground">

@@ -6,6 +6,7 @@ import { Trash2 } from "lucide-react";
 import type { Arretrata } from "@/types/arretrata";
 import { finito, type Lavoro } from "@/contexts/LavoriContext";
 import { durata } from "@/types/trascritta";
+import { LettoreRiga } from "@/app/_components/lettore/Lettore";
 
 import { Anellino, paroleLavoro, tintaLavoro } from "./RigaLavoro";
 
@@ -31,6 +32,11 @@ interface PaginaArretrateProps {
  * Nata come pannello a scomparsa sotto la scheda (galleria 6); dall'08-09
  * sera e' una pagina sua, perche' Greg ha chiesto di separare il registrare
  * dal guardare le registrazioni.
+ *
+ * Dal 25-09 ogni riga ha in testa il ▶ di Trascritte (lo stesso pezzo, lo
+ * stesso lettore): Greg ha chiesto il 24-09 di poter riascoltare una
+ * registrazione prima di trascriverla. C'e' anche sulle mute: e' il modo
+ * piu' rapido per sentire che dentro non c'e' niente.
  */
 export function PaginaArretrate({
   arretrate,
@@ -79,6 +85,7 @@ export function PaginaArretrate({
               key={a.folder}
               className="flex items-center gap-3 border-b border-border/60 py-3 last:border-b-0"
             >
+              <LettoreRiga folder={a.folder} />
               <div
                 className={`min-w-0 flex-1 truncate text-sm ${spenta ? "text-muted-foreground/60" : ""}`}
                 title={a.folder}

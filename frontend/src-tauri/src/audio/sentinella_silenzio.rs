@@ -25,6 +25,15 @@
 //! registrazione muta del tutto le due regole coincidono: tutte e due a 90
 //! secondi.
 //!
+//! **L'uscita, cambiata il 25-09.** Con la sola finestra l'allarme restava
+//! rosso ancora cinque secondi dopo che Greg aveva ripreso a parlare: per
+//! risalire al 5% di 90 secondi servono 5 secondi di suono. Adesso si esce
+//! dopo `RIENTRO` secondi di suono di fila. Ma la finestra e' ancora sotto la
+//! quota, e con la sola regola d'entrata l'allarme si riaccenderebbe al
+//! secondo dopo: per questo, finche' la finestra non risale, si riaccende
+//! solo se il silenzio torna per `RICADUTA` secondi di fila — cioe' se la
+//! voce era un colpo e la registrazione e' di nuovo muta davvero.
+//!
 //! Come parla: due chiamate, `muta(secondi)` la prima volta che la finestra
 //! scende sotto la quota — **una volta sola**, che Greg non vuole avvisi
 //! invadenti (24-09) — e `suono()` quando la finestra risale. Chi la usa decide
@@ -38,6 +47,11 @@ pub const SILENZIO: f32 = 0.005;
 pub const FINESTRA: usize = 90;
 /// Sotto questa frazione di secondi con suono, nella finestra, si avvisa.
 pub const QUOTA: f32 = 0.05;
+/// Secondi di suono di fila che chiudono l'allarme (25-09).
+pub const RIENTRO: usize = 2;
+/// Dopo un rientro con la finestra ancora bassa, i secondi di silenzio di fila
+/// che riaccendono l'allarme (25-09).
+pub const RICADUTA: usize = 30;
 
 pub struct SentinellaSilenzio {
     /// campioni al secondo del flusso che guarda
@@ -48,6 +62,11 @@ pub struct SentinellaSilenzio {
     finestra: VecDeque<bool>,
     /// se l'avviso per questo tratto di silenzio e' gia' partito
     avvisato: bool,
+    /// l'allarme si e' chiuso per la voce, ma la finestra e' ancora sotto la quota
+    rientrata: bool,
+    /// quanti secondi di fila, fino a questo, hanno avuto suono / silenzio
+    suono_di_fila: usize,
+    silenzio_di_fila: usize,
     muta: Box<dyn Fn(u64) + Send>,
     suono: Box<dyn Fn() + Send>,
 }
@@ -63,6 +82,9 @@ impl SentinellaSilenzio {
             secondo: Vec::with_capacity(frequenza as usize),
             finestra: VecDeque::with_capacity(FINESTRA),
             avvisato: false,
+            rientrata: false,
+            suono_di_fila: 0,
+            silenzio_di_fila: 0,
             muta: Box::new(muta),
             suono: Box::new(suono),
         }
@@ -83,7 +105,15 @@ impl SentinellaSilenzio {
         if self.finestra.len() == FINESTRA {
             self.finestra.pop_front();
         }
-        self.finestra.push_back(rms > SILENZIO);
+        let ha_suono = rms > SILENZIO;
+        self.finestra.push_back(ha_suono);
+        if ha_suono {
+            self.suono_di_fila += 1;
+            self.silenzio_di_fila = 0;
+        } else {
+            self.silenzio_di_fila += 1;
+            self.suono_di_fila = 0;
+        }
 
         // prima di novanta secondi non si giudica: la finestra non e' piena
         if self.finestra.len() < FINESTRA {
@@ -92,14 +122,18 @@ impl SentinellaSilenzio {
 
         let con_suono = self.finestra.iter().filter(|x| **x).count();
         let quanto = con_suono as f32 / FINESTRA as f32;
-        if quanto < QUOTA {
-            if !self.avvisato {
-                self.avvisato = true;
-                (self.muta)(FINESTRA as u64);
+        if self.avvisato {
+            if quanto >= QUOTA || self.suono_di_fila >= RIENTRO {
+                self.avvisato = false;
+                self.rientrata = quanto < QUOTA;
+                (self.suono)();
             }
-        } else if self.avvisato {
-            self.avvisato = false;
-            (self.suono)();
+        } else if quanto >= QUOTA {
+            self.rientrata = false;
+        } else if !self.rientrata || self.silenzio_di_fila >= RICADUTA {
+            self.avvisato = true;
+            self.rientrata = false;
+            (self.muta)(FINESTRA as u64);
         }
     }
 }
@@ -174,8 +208,51 @@ mod prove {
         let (mut s, voci) = sentinella();
         dai(&mut s, ZITTO, 90);
         assert_eq!(*voci.lock().unwrap(), vec!["muta"]);
-        dai(&mut s, VOCE, 10); // la finestra risale sopra il 5%
+        dai(&mut s, VOCE, 2); // due secondi di voce di fila bastano (25-09)
         assert_eq!(*voci.lock().unwrap(), vec!["muta", "suono"]);
+    }
+
+    /// Un colpo solo (una porta, un colpo di tosse) non chiude l'allarme.
+    #[test]
+    fn un_colpo_solo_non_chiude_l_allarme() {
+        let (mut s, voci) = sentinella();
+        dai(&mut s, ZITTO, 90);
+        dai(&mut s, VOCE, 1);
+        dai(&mut s, ZITTO, 1);
+        dai(&mut s, VOCE, 1);
+        assert_eq!(*voci.lock().unwrap(), vec!["muta"]);
+    }
+
+    /// Chiuso l'allarme, la finestra e' ancora bassa: non deve riaccendersi al
+    /// secondo dopo, e nemmeno per una pausa normale del discorso.
+    #[test]
+    fn dopo_il_rientro_una_pausa_non_lo_riaccende() {
+        let (mut s, voci) = sentinella();
+        dai(&mut s, ZITTO, 90);
+        dai(&mut s, VOCE, 2);
+        dai(&mut s, ZITTO, 10);
+        assert_eq!(*voci.lock().unwrap(), vec!["muta", "suono"]);
+    }
+
+    /// Ma se la voce era un colpo e torna il silenzio vero, si riaccende.
+    #[test]
+    fn dopo_il_rientro_il_silenzio_vero_lo_riaccende() {
+        let (mut s, voci) = sentinella();
+        dai(&mut s, ZITTO, 90);
+        dai(&mut s, VOCE, 2);
+        dai(&mut s, ZITTO, RICADUTA);
+        assert_eq!(*voci.lock().unwrap(), vec!["muta", "suono", "muta"]);
+    }
+
+    /// Se si riprende a parlare davvero, la finestra risale e la sentinella
+    /// torna quella di prima: un nuovo tratto muto avvisa di nuovo.
+    #[test]
+    fn ripreso_a_parlare_torna_come_prima() {
+        let (mut s, voci) = sentinella();
+        dai(&mut s, ZITTO, 90);
+        dai(&mut s, VOCE, 60);
+        dai(&mut s, ZITTO, 90);
+        assert_eq!(*voci.lock().unwrap(), vec!["muta", "suono", "muta"]);
     }
 
     #[test]

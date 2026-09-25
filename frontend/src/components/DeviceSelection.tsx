@@ -377,25 +377,20 @@ export function DeviceSelection({
         </div>
       </div>
 
-      {/* Info text */}
+      {/* Info text — in italiano dal 25-09; via il consiglio «Test Mic»,
+          che rimandava a un pulsante che qui non c'e' piu' */}
       <div className="space-y-1 text-sm text-muted-foreground">
         <p>
-          • <strong>Microphone:</strong> Records your voice and ambient sound
+          • <strong>Microfono:</strong> la tua voce e i suoni della stanza
         </p>
         <p>
-          • <strong>System Audio:</strong> Records computer audio (music, calls,
-          etc.)
+          • <strong>Audio del PC:</strong> quello che esce dal computer (le
+          chiamate, i video)
         </p>
         {isMonitoring && (
           <p>
-            • <strong>Mic Levels:</strong> Green = good, Yellow = loud, Red =
-            too loud
-          </p>
-        )}
-        {!isMonitoring && inputDevices.length > 0 && (
-          <p>
-            • <strong>Tip:</strong> Click &quot;Test Mic&quot; to check if your
-            microphone is working
+            • <strong>Livelli:</strong> verde va bene, giallo e&apos; forte,
+            rosso e&apos; troppo forte
           </p>
         )}
       </div>

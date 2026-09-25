@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { listen } from "@tauri-apps/api/event";
@@ -232,10 +232,20 @@ export default function Home() {
   // coi secondi, e `registrazione-suono` quando torna qualcosa. Qui: la
   // scheda lo scrive e un avviso resta finche' non si chiude. La notifica di
   // Windows la manda il motore da solo, per chi sta su Teams a tutto schermo.
-  const [silenzio, setSilenzio] = useState<number | null>(null);
+  // Si tiene il secondo del cronometro in cui il silenzio e' cominciato
+  // (l'avviso arriva coi secondi gia' guardati), cosi' la scheda dice da
+  // quanto e il numero cresce col cronometro: fino al 25-09 restava fermo a
+  // «Da 2 min» (90 s arrotondati).
+  const cronometro = useRef(0);
+  useEffect(() => {
+    cronometro.current = recordingState.recordingDuration ?? 0;
+  }, [recordingState.recordingDuration]);
+  const [mutaDal, setMutaDal] = useState<number | null>(null);
+  const silenzio =
+    mutaDal == null ? null : Math.max(0, (recordingState.recordingDuration ?? 0) - mutaDal);
   useEffect(() => {
     if (!isRecording) {
-      setSilenzio(null);
+      setMutaDal(null);
       return;
     }
     let viaMuta: (() => void) | undefined;
@@ -243,7 +253,7 @@ export default function Home() {
     (async () => {
       try {
         viaMuta = await listen<{ secondi: number }>("registrazione-muta", (e) => {
-          setSilenzio(e.payload.secondi);
+          setMutaDal(cronometro.current - e.payload.secondi);
           toast.error("Non sento niente", {
             id: "registrazione-muta",
             description:
@@ -252,7 +262,7 @@ export default function Home() {
           });
         });
         viaSuono = await listen("registrazione-suono", () => {
-          setSilenzio(null);
+          setMutaDal(null);
           toast.dismiss("registrazione-muta");
         });
       } catch (errore) {
