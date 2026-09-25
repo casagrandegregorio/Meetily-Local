@@ -65,7 +65,11 @@ export function PaginaArretrate({
         {arretrate.length > 0 ? (
           <p className="text-sm text-muted-foreground">
             {daLavorare.length > 0
-              ? `${daLavorare.length} · ${durata(minutiTotali)} · circa ${minutiDiLavoro} minuti di lavoro`
+              ? `${daLavorare.length} · ${durata(minutiTotali)} · ${
+                  minutiDiLavoro < 1
+                    ? "meno di un minuto di lavoro"
+                    : `circa ${minutiDiLavoro} ${minutiDiLavoro === 1 ? "minuto" : "minuti"} di lavoro`
+                }`
               : "niente da trascrivere"}
             {quanteMute > 0 ? ` · ${quanteMute} ${quanteMute === 1 ? "muta" : "mute"}` : ""}
           </p>
@@ -97,6 +101,14 @@ export function PaginaArretrate({
               >
                 {durata(a.minutes)}
               </div>
+              {a.ricomposta && (
+                <div
+                  className="text-xs text-muted-foreground"
+                  title="L'app si era chiusa mentre registrava: rimessa insieme dai pezzi salvati, gli ultimi secondi possono mancare."
+                >
+                  ricomposta
+                </div>
+              )}
 
               {lavoro ? (
                 <div className={`flex items-center gap-2 text-xs ${tintaLavoro(lavoro)}`}>

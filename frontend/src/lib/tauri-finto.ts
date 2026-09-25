@@ -126,6 +126,8 @@ const ARRETRATE_FINTE = [
   { folder: "Meeting 2026-07-23_11-34-54_2026-07-23_09-34", minutes: 64, silent: true, percento_voce: 0 },
   { folder: "audio_2026-07-23_10-43", minutes: 64, silent: true, percento_voce: 0 },
   { folder: "audio_2026-07-23_10-41", minutes: 64, silent: true, percento_voce: 0 },
+  // la prova interrotta del 25-09, come sara' dopo la ricomposizione
+  { folder: "Meeting 2026-09-25_10-24-28_2026-09-25_08-24", minutes: 5, silent: false, percento_voce: 90, ricomposta: true },
 ];
 // le cartelle messe nel Cestino finto: spariscono dagli elenchi
 const cestinoFinto = new Set<string>();

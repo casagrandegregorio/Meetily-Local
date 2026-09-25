@@ -46,6 +46,9 @@ pub struct Arretrata {
     /// e' il disco a ricordare che una riunione e' uscita «muta», non la
     /// memoria dell'app (15-09: riaperta l'app, la riga tornava TRASCRIVI)
     pub esito: Option<Avanzamento>,
+    /// rimessa insieme dai pezzi dopo che l'app si era chiusa registrando
+    /// (`ricomponi.rs`, dal 25-09)
+    pub ricomposta: bool,
 }
 
 /// Una riunione con il suo testo.
@@ -63,6 +66,8 @@ struct Metadata {
     created_at: Option<String>,
     completed_at: Option<String>,
     duration_seconds: Option<f64>,
+    #[serde(default)]
+    ricomposta: bool,
 }
 
 #[derive(Deserialize)]
@@ -164,6 +169,8 @@ pub async fn list_pending_recordings<R: Runtime>(
     in_corso: tauri::State<'_, InCorso>,
 ) -> Result<Vec<Arretrata>, String> {
     let radice = cartella_registrazioni(&app).await?;
+    // prima si ricompongono le registrazioni interrotte, cosi' compaiono qui
+    crate::ricomponi::ricomponi_interrotte(radice.clone()).await;
     let vivi: HashSet<String> = in_corso
         .0
         .lock()
@@ -183,6 +190,7 @@ pub async fn list_pending_recordings<R: Runtime>(
                 silent: livello.as_ref().map(|l| l.muta),
                 percento_voce: livello.and_then(|l| l.percento_voce),
                 esito,
+                ricomposta: meta.ricomposta,
             }
         })
         .collect();

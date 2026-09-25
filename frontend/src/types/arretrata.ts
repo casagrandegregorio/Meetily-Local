@@ -25,6 +25,11 @@ export interface Arretrata {
    * dell'app (15-09: riaperta l'app, la riga tornava TRASCRIVI).
    */
   esito: Avanzamento | null;
+  /**
+   * Rimessa insieme dai pezzi dopo che l'app si era chiusa mentre registrava
+   * (`ricomponi.rs`, 25-09): gli ultimi secondi possono mancare.
+   */
+  ricomposta?: boolean;
 }
 
 /** Il comando Tauri che elenca le cartelle senza `trascrizione.md`. */

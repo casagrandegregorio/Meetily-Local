@@ -45,6 +45,8 @@ pub mod ollama;
 pub mod onboarding;
 // le riunioni come stanno sul disco: arretrate, trascritte, il testo di una
 pub mod riunioni;
+// le registrazioni interrotte (app chiusa mentre registrava) si ricompongono
+pub mod ricomponi;
 pub mod openai;
 pub mod openrouter;
 pub mod speaker_diarization;
