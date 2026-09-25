@@ -293,7 +293,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
     info!("🔍 IS_RECORDING state check: {}", current_recording_state);
     if current_recording_state {
-        return Err("Recording already in progress".to_string());
+        return Err("Sta gia' registrando: premi STOP sulla scheda o dall'icona vicino all'orologio".to_string());
     }
 
     // Validate that transcription models are available before starting recording.
@@ -415,7 +415,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
     info!("🔍 IS_RECORDING state check: {}", current_recording_state);
     if current_recording_state {
-        return Err("Recording already in progress".to_string());
+        return Err("Sta gia' registrando: premi STOP sulla scheda o dall'icona vicino all'orologio".to_string());
     }
 
     // Validate that transcription models are available before starting recording.
@@ -572,7 +572,7 @@ pub async fn stop_recording<R: Runtime>(
         }
         Err(e) => {
             error!("❌ Failed to stop audio streams: {}", e);
-            return Err(format!("Failed to stop audio streams: {}", e));
+            return Err(format!("Non riesco a fermare l'audio: {}", e));
         }
     }
 
