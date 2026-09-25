@@ -346,6 +346,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
     manager.set_sentinella_silenzio(sentinella_per(&app));
     manager.set_misura_livelli(misura_per(&app));
+    // la cartella delle Impostazioni, la stessa che leggono gli elenchi (25-09)
+    match super::recording_preferences::load_recording_preferences(&app).await {
+        Ok(prefs) => manager.set_cartella_registrazioni(prefs.save_folder),
+        Err(e) => warn!("Preferenze non leggibili, registro nella cartella predefinita: {}", e),
+    }
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
@@ -469,6 +474,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
     manager.set_sentinella_silenzio(sentinella_per(&app));
     manager.set_misura_livelli(misura_per(&app));
+    // la cartella delle Impostazioni, la stessa che leggono gli elenchi (25-09)
+    match super::recording_preferences::load_recording_preferences(&app).await {
+        Ok(prefs) => manager.set_cartella_registrazioni(prefs.save_folder),
+        Err(e) => warn!("Preferenze non leggibili, registro nella cartella predefinita: {}", e),
+    }
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager

@@ -474,6 +474,12 @@ impl RecordingManager {
         self.state.has_fatal_error()
     }
 
+    /// La cartella delle registrazioni delle Impostazioni, da mettere prima
+    /// di `start_recording` (25-09).
+    pub fn set_cartella_registrazioni(&mut self, cartella: std::path::PathBuf) {
+        self.recording_saver.set_cartella_base(cartella);
+    }
+
     /// Set the meeting name for this recording session
     pub fn set_meeting_name(&mut self, name: Option<String>) {
         self.recording_saver.set_meeting_name(name);

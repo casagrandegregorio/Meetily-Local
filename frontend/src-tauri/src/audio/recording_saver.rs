@@ -94,6 +94,9 @@ pub struct RecordingSaver {
     is_saving: Arc<Mutex<bool>>,
     /// la sentinella del silenzio, se qualcuno vuole essere avvisato
     sentinella: Option<SentinellaSilenzio>,
+    /// dove nasce la cartella della riunione: quella delle Impostazioni.
+    /// `None` = la cartella predefinita (Musica/meetily-recordings)
+    cartella_base: Option<PathBuf>,
 }
 
 impl RecordingSaver {
@@ -107,7 +110,16 @@ impl RecordingSaver {
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
             sentinella: None,
+            cartella_base: None,
         }
+    }
+
+    /// La cartella delle registrazioni scelta nelle Impostazioni. Fino al
+    /// 25-09 il motore scriveva sempre nella predefinita, mentre gli elenchi
+    /// leggevano quella scelta: cambiandola, le registrazioni nuove non
+    /// comparivano piu' da nessuna parte.
+    pub fn set_cartella_base(&mut self, cartella: PathBuf) {
+        self.cartella_base = Some(cartella);
     }
 
     /// Mette la sentinella del silenzio sull'audio che va su disco. Va
@@ -312,7 +324,10 @@ impl RecordingSaver {
         create_checkpoints: bool,
     ) -> Result<()> {
         // Load preferences to get base recordings folder
-        let base_folder = super::recording_preferences::get_default_recordings_folder();
+        let base_folder = self
+            .cartella_base
+            .clone()
+            .unwrap_or_else(super::recording_preferences::get_default_recordings_folder);
 
         // Create meeting folder structure (with or without .checkpoints/ subdirectory)
         let meeting_folder = create_meeting_folder(&base_folder, meeting_name, create_checkpoints)?;
