@@ -228,13 +228,13 @@ const risposteFinte: Record<string, unknown> = {
   // legge `usePermissionCheck`. Con `kind: "input"` l'app diceva «Nessun
   // microfono» e teneva spento il pulsante per registrare.
   get_audio_devices: [
-    { name: "Microphone Array (Intel Smart Sound)", device_type: "Input", is_default: true },
+    { name: "Microphone Array (Intel® Smart Sound Technology for Digital Microphones)", device_type: "Input", is_default: true },
     { name: "Headset (Bose QC Headphones)", device_type: "Input", is_default: false },
     { name: "Headphones (Bose QC)", device_type: "Output", is_default: true },
     { name: "Speakers (Realtek Audio)", device_type: "Output", is_default: false },
   ],
   // i predefiniti di Windows, quelli che la registrazione usa davvero
-  get_default_audio_devices: ["Microphone Array (Intel Smart Sound)", "Headphones (Bose QC)"],
+  get_default_audio_devices: ["Microphone Array (Intel® Smart Sound Technology for Digital Microphones)", "Headphones (Bose QC)"],
   // il file delle preferenze, tenuto in memoria: la scelta fatta sulla
   // scheda si rivede nelle Impostazioni, e viceversa (18-09)
   get_recording_preferences: () => ({ ...preferenzeFinte }),
