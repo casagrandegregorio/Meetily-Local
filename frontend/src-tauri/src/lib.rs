@@ -1007,6 +1007,31 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 log::info!("Application exiting, cleaning up resources...");
                 tauri::async_runtime::block_on(async {
+                    // Chiudere l'app (la X, o Esci dall'icona) mentre registra:
+                    // prima si ferma la registrazione come con STOP, cosi' i
+                    // pezzi diventano `audio.mp4` e la riunione compare in
+                    // «Da trascrivere». Fino al 25-09 l'app usciva e basta, e
+                    // la registrazione restava a meta' (ora la ricompone anche
+                    // `ricomponi.rs`, ma senza gli ultimi secondi).
+                    if audio::recording_commands::is_recording().await {
+                        log::info!("Chiusura durante una registrazione: la fermo e la salvo");
+                        let cartella = _app_handle
+                            .path()
+                            .app_data_dir()
+                            .unwrap_or_else(|_| std::env::temp_dir());
+                        let percorso = cartella.join("recording-chiusura.wav");
+                        if let Err(e) = audio::recording_commands::stop_recording(
+                            _app_handle.clone(),
+                            audio::recording_commands::RecordingArgs {
+                                save_path: percorso.to_string_lossy().to_string(),
+                            },
+                        )
+                        .await
+                        {
+                            log::error!("Registrazione non salvata alla chiusura: {}", e);
+                        }
+                    }
+
                     // Clean up database connection and checkpoint WAL
                     if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
                         log::info!("Starting database cleanup...");
