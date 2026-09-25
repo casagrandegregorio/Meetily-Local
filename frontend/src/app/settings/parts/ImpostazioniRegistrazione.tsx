@@ -86,7 +86,7 @@ export function ImpostazioniRegistrazione() {
 
   return (
     <div>
-      <MenuApparecchi preferenze={preferenze} forma="campo" className={classeValore} Campo={Campo} />
+      <MenuApparecchi preferenze={preferenze} className={classeValore} Campo={Campo} />
 
       <Campo nome="Cartella delle registrazioni">
         <input
