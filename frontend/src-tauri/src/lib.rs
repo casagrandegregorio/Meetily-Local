@@ -629,6 +629,17 @@ pub fn run() {
     whisper_rs::install_logging_hooks();
 
     tauri::Builder::default()
+        // Una copia sola dell'app (25-09): aprendone una seconda, si porta
+        // avanti la finestra della prima e la seconda si chiude. Prima due
+        // copie potevano registrare insieme, e ognuna non sapeva dell'altra.
+        // Deve essere il primo plugin.
+        .plugin(tauri_plugin_single_instance::init(|app, _argomenti, _cartella| {
+            if let Some(finestra) = app.get_webview_window("main") {
+                let _ = finestra.unminimize();
+                let _ = finestra.show();
+                let _ = finestra.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())

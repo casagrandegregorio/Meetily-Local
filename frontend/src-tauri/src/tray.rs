@@ -348,15 +348,11 @@ fn build_menu<R: Runtime>(
                 );
             }
             RecordingState::Recording => {
-                builder = builder
-                    .item(
-                        &MenuItemBuilder::with_id("pause_recording", "⏸ Pausa")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("stop_recording", "⏹ Stop")
-                            .build(app)?,
-                    );
+                // Niente Pausa (25-09): la scheda non la mostra, e una
+                // registrazione in pausa sembrava ferma senza esserlo.
+                builder = builder.item(
+                    &MenuItemBuilder::with_id("stop_recording", "⏹ Stop").build(app)?,
+                );
             }
             RecordingState::Pausing => {
                 builder = builder
