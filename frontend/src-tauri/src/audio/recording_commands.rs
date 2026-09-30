@@ -332,11 +332,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let auto_save = ALWAYS_SAVE_AUDIO;
 
     // Always ensure a meeting name is set so incremental saver initializes
-    let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
-        // Example: Meeting 2025-10-03_08-25-23
-        let now = chrono::Local::now();
-        format!("Meeting {}", now.format("%Y-%m-%d_%H-%M-%S"))
-    });
+    // Il nome alla partenza (30-09): «30-09-2026 · 09.07». Allo Stop la
+    // cartella prende anche fine e durata (`nome_riunione`).
+    let effective_meeting_name = meeting_name
+        .clone()
+        .unwrap_or_else(|| crate::nome_riunione::all_avvio(&chrono::Local::now()));
     manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
@@ -461,10 +461,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let auto_save = ALWAYS_SAVE_AUDIO;
 
     // Always ensure a meeting name is set so incremental saver initializes
-    let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
-        let now = chrono::Local::now();
-        format!("Meeting {}", now.format("%Y-%m-%d_%H-%M-%S"))
-    });
+    let effective_meeting_name = meeting_name
+        .clone()
+        .unwrap_or_else(|| crate::nome_riunione::all_avvio(&chrono::Local::now()));
     manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
@@ -787,7 +786,7 @@ pub async fn stop_recording<R: Runtime>(
         let meeting_folder = manager.get_meeting_folder();
         let meeting_name = manager.get_meeting_name();
 
-        match tokio::time::timeout(
+        let salvata = match tokio::time::timeout(
             tokio::time::Duration::from_secs(300), // 5 minutes max for file I/O
             manager.save_recording_only(&app),
         )
@@ -795,6 +794,7 @@ pub async fn stop_recording<R: Runtime>(
         {
             Ok(Ok(_)) => {
                 info!("✅ Recording data saved successfully during cleanup");
+                true
             }
             Ok(Err(e)) => {
                 warn!(
@@ -802,14 +802,33 @@ pub async fn stop_recording<R: Runtime>(
                     e
                 );
                 // Don't fail shutdown - transcripts are already preserved
+                false
             }
             Err(_) => {
                 warn!("⏱️ File I/O timeout (5 minutes) reached during save, continuing shutdown");
                 // Don't fail shutdown - transcripts are already preserved
+                false
             }
-        }
+        };
 
-        (meeting_folder, meeting_name)
+        // Il nome di fine (30-09): adesso che si sa quanto e' durata, la
+        // cartella diventa «30-09-2026 · 09.07–09.50 · 0h43». Prima dell'evento
+        // `recording-stopped`, che porta alla scheda il nome della cartella.
+        // Se non riesce, resta il nome di partenza: la registrazione e' salva.
+        // Il manager si lascia andare prima: se tiene aperto un file nella
+        // cartella, Windows non la lascia rinominare.
+        drop(manager);
+        match (salvata, meeting_folder) {
+            (true, Some(dir)) => {
+                let nuova = crate::nome_riunione::rinomina_alla_fine(&dir);
+                let nome = nuova
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .or(meeting_name);
+                (Some(nuova), nome)
+            }
+            (_, cartella) => (cartella, meeting_name),
+        }
     } else {
         info!("ℹ️ No recording manager available for cleanup");
         (None, None)

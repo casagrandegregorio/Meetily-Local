@@ -134,7 +134,9 @@ async fn cartella_registrazioni<R: Runtime>(app: &AppHandle<R>) -> Result<PathBu
         .map_err(|e| format!("Failed to load recording preferences: {}", e))
 }
 
-/// Le sottocartelle che hanno un `audio.mp4`, in ordine di nome.
+/// Le sottocartelle che hanno un `audio.mp4`, in ordine di quando sono
+/// cominciate (30-09: i nomi nuovi cominciano col giorno, e in ordine di nome
+/// il 30 settembre verrebbe prima del 4 ottobre). A parita', il nome.
 fn cartelle_con_audio(radice: &Path) -> Result<Vec<PathBuf>, String> {
     let elementi = std::fs::read_dir(radice)
         .map_err(|e| format!("Cannot read recordings folder {:?}: {}", radice, e))?;
@@ -142,8 +144,16 @@ fn cartelle_con_audio(radice: &Path) -> Result<Vec<PathBuf>, String> {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.is_dir() && p.join(AUDIO).is_file())
         .collect();
-    cartelle.sort();
+    cartelle.sort_by_key(|dir| (inizio(dir), dir.clone()));
     Ok(cartelle)
+}
+
+/// Quando e' cominciata una registrazione, da `metadata.json`.
+fn inizio(dir: &Path) -> Option<DateTime<Utc>> {
+    leggi_json::<Metadata>(&dir.join(METADATA))
+        .and_then(|m| m.created_at)
+        .as_deref()
+        .and_then(parse_iso)
 }
 
 fn nome(dir: &Path) -> String {

@@ -197,6 +197,8 @@ fn ricomponi(ffmpeg: &Path, dir: &Path) -> Result<usize, String> {
     if let Err(e) = std::fs::remove_dir_all(dir.join(CHECKPOINTS)) {
         log::warn!("Pezzi di {:?} non buttati: {}", dir, e);
     }
+    // come allo Stop (30-09): inizio, fine e durata nel nome della cartella
+    crate::nome_riunione::rinomina_alla_fine(dir);
     Ok(usati.len())
 }
 
@@ -305,6 +307,64 @@ mod prove {
         assert_eq!(m["duration_seconds"], 270.0);
         assert_eq!(m["ricomposta"], true);
         assert!(m["completed_at"].as_str().unwrap().starts_with("2026-09-25T08:28:58"));
+    }
+
+    /// Il nome della cartella (30-09, `nome_riunione`): le prove stanno qui
+    /// perche' la ricetta della build fa girare solo «sentinella» e «ricomponi».
+    fn alle_9_07_57() -> DateTime<chrono::Local> {
+        use chrono::TimeZone;
+        chrono::Local.with_ymd_and_hms(2026, 9, 30, 9, 7, 57).unwrap()
+    }
+
+    #[test]
+    fn il_nome_alla_partenza() {
+        assert_eq!(crate::nome_riunione::all_avvio(&alle_9_07_57()), "30-09-2026 · 09.07");
+    }
+
+    #[test]
+    fn il_nome_allo_stop_ha_fine_e_durata() {
+        // la riunione del 30-09: 42 minuti e 39,64 secondi
+        assert_eq!(
+            crate::nome_riunione::alla_fine(&alle_9_07_57(), 2559.64),
+            "30-09-2026 · 09.07–09.50 · 0h43"
+        );
+        // sopra l'ora: 1 ora, 34 minuti e 17 secondi
+        assert_eq!(
+            crate::nome_riunione::alla_fine(&alle_9_07_57(), 5657.0),
+            "30-09-2026 · 09.07–10.42 · 1h34"
+        );
+    }
+
+    #[test]
+    fn un_nome_gia_preso_prende_il_2() {
+        let base = std::env::temp_dir().join(format!("ricomponi-nomi-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("30-09-2026 · 09.07")).unwrap();
+        let posto = crate::nome_riunione::libero(&base, "30-09-2026 · 09.07");
+        assert_eq!(posto.file_name().unwrap().to_str().unwrap(), "30-09-2026 · 09.07 (2)");
+    }
+
+    #[test]
+    fn la_cartella_si_rinomina_e_l_audio_va_con_lei() {
+        let dir = cartella("rinomina", "completed", 0, true);
+        std::fs::write(
+            dir.join(METADATA),
+            r#"{"status":"completed","created_at":"2026-09-30T07:07:57Z","duration_seconds":2559.64}"#,
+        )
+        .unwrap();
+        let nuova = crate::nome_riunione::rinomina_alla_fine(&dir);
+        let nome = nuova.file_name().unwrap().to_str().unwrap().to_string();
+        assert!(nome.starts_with("30-09-2026 · "), "{}", nome);
+        assert!(nome.ends_with(" · 0h43"), "{}", nome);
+        assert!(nuova.join(AUDIO).is_file());
+        assert!(!dir.exists());
+        let _ = std::fs::remove_dir_all(&nuova);
+    }
+
+    #[test]
+    fn senza_durata_il_nome_resta() {
+        let dir = cartella("senzadurata", "completed", 0, true);
+        assert_eq!(crate::nome_riunione::rinomina_alla_fine(&dir), dir);
     }
 
     #[test]

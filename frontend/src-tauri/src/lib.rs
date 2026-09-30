@@ -47,6 +47,8 @@ pub mod onboarding;
 pub mod riunioni;
 // le registrazioni interrotte (app chiusa mentre registrava) si ricompongono
 pub mod ricomponi;
+// il nome della cartella: giorno e ora alla partenza, fine e durata allo Stop
+pub mod nome_riunione;
 pub mod openai;
 pub mod openrouter;
 pub mod speaker_diarization;

@@ -63,6 +63,25 @@ pub fn create_meeting_folder(
     Ok(meeting_folder)
 }
 
+/// La cartella di una registrazione (30-09): si chiama solo col nome della
+/// riunione, senza l'ora di Greenwich in coda che `create_meeting_folder`
+/// aggiunge. Se il nome c'e' gia', ` (2)`, ` (3)`, … (`nome_riunione::libero`).
+/// `create_meeting_folder` resta com'e' per gli import.
+pub fn cartella_riunione(
+    base_path: &PathBuf,
+    meeting_name: &str,
+    create_checkpoints_dir: bool,
+) -> Result<PathBuf> {
+    let meeting_folder =
+        crate::nome_riunione::libero(base_path, &sanitize_filename(meeting_name));
+    std::fs::create_dir_all(&meeting_folder)?;
+    if create_checkpoints_dir {
+        std::fs::create_dir_all(meeting_folder.join(".checkpoints"))?;
+    }
+    log::info!("Created meeting folder: {}", meeting_folder.display());
+    Ok(meeting_folder)
+}
+
 pub fn normalize_v2(audio: &[f32]) -> Vec<f32> {
     let rms = (audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
     let peak = audio

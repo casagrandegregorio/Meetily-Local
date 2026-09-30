@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::audio_processing::create_meeting_folder;
+use super::audio_processing::cartella_riunione;
 use super::incremental_saver::IncrementalAudioSaver;
 use super::recording_state::AudioChunk;
 use super::sentinella_silenzio::SentinellaSilenzio;
@@ -330,7 +330,7 @@ impl RecordingSaver {
             .unwrap_or_else(super::recording_preferences::get_default_recordings_folder);
 
         // Create meeting folder structure (with or without .checkpoints/ subdirectory)
-        let meeting_folder = create_meeting_folder(&base_folder, meeting_name, create_checkpoints)?;
+        let meeting_folder = cartella_riunione(&base_folder, meeting_name, create_checkpoints)?;
 
         // Only initialize incremental saver if checkpoints are needed (auto_save is true)
         if create_checkpoints {
