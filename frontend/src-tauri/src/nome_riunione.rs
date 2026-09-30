@@ -66,16 +66,25 @@ pub fn rinomina_alla_fine(dir: &Path) -> PathBuf {
 fn prova_a_rinominare(dir: &Path) -> Result<PathBuf, String> {
     let testo = std::fs::read_to_string(dir.join("metadata.json")).map_err(|e| e.to_string())?;
     let meta: serde_json::Value = serde_json::from_str(&testo).map_err(|e| e.to_string())?;
-    let inizio = meta
-        .get("created_at")
-        .and_then(|s| s.as_str())
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&Local))
-        .ok_or_else(|| "manca created_at".to_string())?;
+    let ora = |campo: &str| {
+        meta.get(campo)
+            .and_then(|s| s.as_str())
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.with_timezone(&Local))
+    };
+    let inizio = ora("created_at").ok_or_else(|| "manca created_at".to_string())?;
+    // `duration_seconds` allo Stop resta vuoto (visto il 30-09: vuoto in tutte
+    // le registrazioni normali, lo scrivono solo gli import e le ricomposte):
+    // allora la durata e' la distanza fra inizio e fine, come in `riunioni.rs`.
     let secondi = meta
         .get("duration_seconds")
         .and_then(|s| s.as_f64())
-        .ok_or_else(|| "manca duration_seconds".to_string())?;
+        .or_else(|| {
+            ora("completed_at")
+                .filter(|fine| *fine > inizio)
+                .map(|fine| (fine - inizio).num_milliseconds() as f64 / 1000.0)
+        })
+        .ok_or_else(|| "manca la durata, e anche completed_at".to_string())?;
     let nome = alla_fine(&inizio, secondi);
     if dir.file_name().and_then(|n| n.to_str()) == Some(nome.as_str()) {
         return Ok(dir.to_path_buf());
