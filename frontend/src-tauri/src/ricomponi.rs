@@ -362,7 +362,23 @@ mod prove {
     }
 
     #[test]
-    fn senza_durata_il_nome_resta() {
+    fn senza_durata_si_usa_l_ora_di_fine() {
+        // com'e' davvero allo Stop (30-09): `duration_seconds` vuoto, la fine c'e'
+        let dir = cartella("solofine", "completed", 0, true);
+        std::fs::write(
+            dir.join(METADATA),
+            r#"{"status":"completed","created_at":"2026-09-30T11:53:13Z","completed_at":"2026-09-30T12:36:13Z","duration_seconds":null}"#,
+        )
+        .unwrap();
+        let nuova = crate::nome_riunione::rinomina_alla_fine(&dir);
+        let nome = nuova.file_name().unwrap().to_str().unwrap().to_string();
+        assert!(nome.ends_with(" · 0h43"), "{}", nome);
+        assert!(nuova.join(AUDIO).is_file());
+        let _ = std::fs::remove_dir_all(&nuova);
+    }
+
+    #[test]
+    fn senza_durata_ne_fine_il_nome_resta() {
         let dir = cartella("senzadurata", "completed", 0, true);
         assert_eq!(crate::nome_riunione::rinomina_alla_fine(&dir), dir);
     }
