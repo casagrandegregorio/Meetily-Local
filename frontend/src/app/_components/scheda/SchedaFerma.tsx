@@ -66,7 +66,7 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
 
             {ultima && (
               <div className="text-sm text-muted-foreground">
-                Ultima: {giorno(ultima.recorded_at)} · {chiCera(ultima)} ·{" "}
+                Ultima trascritta: {giorno(ultima.recorded_at)} · {chiCera(ultima)} ·{" "}
                 {durata(ultima.minutes)}
               </div>
             )}

@@ -537,6 +537,27 @@ jobs:
           cache-directories: |
             target/sherpa-onnx-prebuilt
 
+      # 10-11: even with cache-directories above, a cache saved by a
+      # successful build sometimes comes back without sherpa-onnx-c-api.lib
+      # while keeping the sherpa-onnx-sys build-script output, so cargo skips
+      # the download and the final link dies with LNK1181. It happened after
+      # every successful build and was cured by deleting the v0-rust cache by
+      # hand. Here the same cure is automatic: if the lib is missing, drop the
+      # sherpa-onnx-sys build outputs and fingerprints so its build script
+      # runs again and downloads the libs.
+      - name: Make sure the sherpa-onnx libs survived the cache restore
+        shell: pwsh
+        run: |
+          $lib = Get-ChildItem -Path target -Recurse -Filter "sherpa-onnx-c-api.lib" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($lib) {
+            Write-Host "sherpa-onnx-c-api.lib present: $($lib.FullName)"
+          } else {
+            Write-Host "sherpa-onnx-c-api.lib missing after cache restore: forcing sherpa-onnx-sys to rebuild"
+            Get-ChildItem -Path target -Recurse -Directory -Filter "sherpa-onnx-sys-*" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Parent.Name -in @("build", ".fingerprint") } |
+              ForEach-Object { Write-Host "  removing $($_.FullName)"; Remove-Item $_.FullName -Recurse -Force }
+          }
+
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
