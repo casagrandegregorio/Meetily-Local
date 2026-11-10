@@ -83,10 +83,37 @@ function cartellaFintaDiAdesso(): string {
   return `Meeting ${locale}_${ora}_${locale}_${utc}`;
 }
 
+/** Il momento chiesto con `?momento=`, per le varianti del finto. */
+const momentoNellIndirizzo = () =>
+  typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("momento");
+
+/**
+ * Gli apparecchi che il motore avrebbe aperto (`apparecchi_in_uso`): la
+ * scelta delle preferenze o il predefinito di Windows, come fa il motore.
+ * `?momento=registra-senza-pc` fa la registrazione in cui l'audio del PC non
+ * si apre e si registra il solo microfono. Fuori dalla registrazione: `null`.
+ */
+function apparecchiInUsoFinti() {
+  const chiesto = momentoNellIndirizzo();
+  if (registrazioneFinta === null && !chiesto?.startsWith("registra")) return null;
+  const [micDefault, pcDefault] = risposteFinte.get_default_audio_devices as [string, string];
+  return {
+    microfono: (preferenzeFinte.preferred_mic_device as string | null) ?? micDefault,
+    audio_pc:
+      chiesto === "registra-senza-pc"
+        ? null
+        : ((preferenzeFinte.preferred_system_device as string | null) ?? pcDefault),
+  };
+}
+
 function avviaRegistrazioneFinta() {
   registrazioneFinta = { dal: Date.now(), folder: cartellaFintaDiAdesso() };
-  // il backend vero lo manda dopo un attimo, non dentro la chiamata
-  setTimeout(() => emettiFinto("recording-started", null), 50);
+  // il backend vero lo manda dopo un attimo, non dentro la chiamata; i nomi
+  // degli apparecchi aperti prima della partenza, come il motore
+  setTimeout(() => {
+    emettiFinto("apparecchi-in-uso", apparecchiInUsoFinti());
+    emettiFinto("recording-started", null);
+  }, 50);
   return null;
 }
 
@@ -211,9 +238,13 @@ const TRASCRITTE_FINTE = [
     trascritta("audio_2026-07-14_14-16", 88, 5, ["Marco"]),
 ];
 
+// `?momento=ferma-manca`: il microfono scelto non e' fra quelli collegati (le
+// cuffie Bluetooth spente), e la striscia lo dice col «non c'e'» rosso
 const preferenzeFinte: Record<string, unknown> = {
   save_folder: "C:\\Users\\gcasagrande\\Music\\meetily-recordings",
-  auto_save: true, file_format: "mp4", preferred_mic_device: null, preferred_system_device: null,
+  auto_save: true, file_format: "mp4",
+  preferred_mic_device: momentoNellIndirizzo() === "ferma-manca" ? "Headset (Bose QC35 II)" : null,
+  preferred_system_device: null,
 };
 
 // due riunioni finte, coi nomi di fantasia gia' in uso nel progetto
@@ -235,6 +266,8 @@ const risposteFinte: Record<string, unknown> = {
   ],
   // i predefiniti di Windows, quelli che la registrazione usa davvero
   get_default_audio_devices: ["Microphone Array (Intel® Smart Sound Technology for Digital Microphones)", "Headphones (Bose QC)"],
+  // gli apparecchi che la registrazione ha aperto davvero (dal 10-11)
+  apparecchi_in_uso: () => apparecchiInUsoFinti(),
   // il file delle preferenze, tenuto in memoria: la scelta fatta sulla
   // scheda si rivede nelle Impostazioni, e viceversa (18-09)
   get_recording_preferences: () => ({ ...preferenzeFinte }),

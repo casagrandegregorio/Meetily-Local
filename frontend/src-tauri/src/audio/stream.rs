@@ -31,6 +31,11 @@ unsafe impl Send for StreamBackend {}
 pub struct AudioStream {
     device: Arc<AudioDevice>,
     backend: StreamBackend,
+    /// Il nome che Windows da' all'apparecchio aperto davvero (10-11). Puo'
+    /// non essere `device.name`: `get_device_and_config` cerca il nome con
+    /// `contains` e, se non lo trova, ripiega zitto sul predefinito. E' questo
+    /// il nome che la scheda mostra mentre registra (`apparecchi_in_uso.rs`).
+    nome_aperto: String,
 }
 
 // SAFETY: AudioStream contains StreamBackend which we've marked as Send
@@ -118,6 +123,13 @@ impl AudioStream {
 
         // Get the underlying cpal device and config
         let (cpal_device, config) = get_device_and_config(&device).await?;
+        let nome_aperto = cpal_device.name().unwrap_or_else(|_| device.name.clone());
+        if nome_aperto != device.name {
+            warn!(
+                "⚠️ Chiesto '{}', aperto '{}': la registrazione usa quello aperto",
+                device.name, nome_aperto
+            );
+        }
 
         info!(
             "Audio config - Sample rate: {}, Channels: {}, Format: {:?}",
@@ -145,7 +157,13 @@ impl AudioStream {
         Ok(Self {
             device,
             backend: StreamBackend::Cpal(stream),
+            nome_aperto,
         })
+    }
+
+    /// Il nome dell'apparecchio aperto davvero (vedi `nome_aperto`).
+    pub fn nome_aperto(&self) -> &str {
+        &self.nome_aperto
     }
 
     /// Create a Core Audio stream (macOS only)
@@ -247,6 +265,7 @@ impl AudioStream {
         Ok(Self {
             device: device.clone(),
             backend: StreamBackend::CoreAudio { task: Some(task) },
+            nome_aperto: device.name.clone(),
         })
     }
 
@@ -528,6 +547,16 @@ impl AudioStreamManager {
     /// Check if any streams are active
     pub fn has_active_streams(&self) -> bool {
         self.microphone_stream.is_some() || self.system_stream.is_some()
+    }
+
+    /// I nomi degli apparecchi aperti davvero: (microfono, audio del PC).
+    /// `None` = quello stream non c'e'; per l'audio del PC succede quando non
+    /// si apre, perche' `start_streams` allora registra il solo microfono.
+    pub fn nomi_aperti(&self) -> (Option<String>, Option<String>) {
+        (
+            self.microphone_stream.as_ref().map(|s| s.nome_aperto().to_string()),
+            self.system_stream.as_ref().map(|s| s.nome_aperto().to_string()),
+        )
     }
 }
 

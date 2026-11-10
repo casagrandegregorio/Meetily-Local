@@ -358,6 +358,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
+    // i nomi degli apparecchi aperti davvero, per la scheda (10-11): prima di
+    // `recording-started`, cosi' la scheda che nasce li trova gia'
+    super::apparecchi_in_uso::pubblica(&app, manager.apparecchi_aperti());
+
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -484,6 +488,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         .start_recording(mic_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
+
+    // i nomi degli apparecchi aperti davvero, per la scheda (10-11)
+    super::apparecchi_in_uso::pubblica(&app, manager.apparecchi_aperti());
 
     // Store the manager globally to keep it alive
     {
@@ -837,6 +844,7 @@ pub async fn stop_recording<R: Runtime>(
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
+    super::apparecchi_in_uso::azzera();
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.

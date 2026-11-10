@@ -28,7 +28,13 @@ const VENTISETTE_AGOSTO = "Meeting 2026-08-27_15-02-24_2026-08-27_13-02";
 // le chiavi sono i sei momenti piu' qualche variante (`registra-muta`)
 const MOMENTI_FINTI: Record<string, Momento> = {
   ferma: { tipo: "ferma" },
+  // il microfono scelto non e' collegato: la striscia dice «non c'e'» (le
+  // preferenze finte le cambia `tauri-finto.ts`, che legge lo stesso nome)
+  "ferma-manca": { tipo: "ferma" },
   registra: { tipo: "registra", secondi: 12 * 60 + 34 },
+  // l'audio del PC non si e' aperto: si registra il solo microfono, e la
+  // striscia lo dice in rosso (gli apparecchi finti li da' `tauri-finto.ts`)
+  "registra-senza-pc": { tipo: "registra", secondi: 12 * 60 + 34 },
   // la sentinella del silenzio che avvisa: i 90 secondi di finestra che ha
   // guardato, e dentro non c'era quasi niente (la regola nuova del 24-09)
   "registra-muta": { tipo: "registra", secondi: 12 * 60 + 34, silenzio: 90 },

@@ -154,6 +154,12 @@ impl RecordingManager {
         Ok(transcription_receiver)
     }
 
+    /// Gli apparecchi aperti davvero: (microfono, audio del PC), `None` se
+    /// quello stream non c'e' (vedi `AudioStreamManager::nomi_aperti`).
+    pub fn apparecchi_aperti(&self) -> (Option<String>, Option<String>) {
+        self.stream_manager.nomi_aperti()
+    }
+
     /// Start recording with default devices and auto_save setting
     ///
     /// # Arguments

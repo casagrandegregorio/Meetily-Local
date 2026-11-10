@@ -2,17 +2,21 @@
 
 import { useState, type ReactNode } from "react";
 
+import type { ApparecchiInUso } from "@/hooks/useApparecchiInUso";
 import { NIENTE, type DueLivelli } from "@/hooks/useLivelliRegistrazione";
 import { minutiRestanti, type Momento } from "@/types/momento";
 import { durata } from "@/types/trascritta";
 import { orario } from "@/types/trascrizione";
 
 import { SchedaFerma } from "./SchedaFerma";
+import { StrisciaInUso } from "./StrisciaApparecchi";
 
 interface SchedaRiunioneProps {
   momento: Momento;
   /** le due file di barrette mentre registra, valori 0..1 */
   livelli?: DueLivelli;
+  /** mentre registra: gli apparecchi che il motore ha aperto davvero */
+  inUso?: ApparecchiInUso | null;
   onStart: () => void;
   isStarting: boolean;
   onStop: () => void;
@@ -33,24 +37,40 @@ interface SchedaRiunioneProps {
  * di testo rossa sotto le barrette, che provandola Greg non ha riconosciuto
  * come un avviso; poi un filo rosso attorno alla scheda (galleria 19, A3), che
  * con Teams a tutto schermo si vede ancora troppo poco.
+ *
+ * Con `piede` la scheda ha una fascia sotto, separata da un filo: e' dove
+ * stanno gli apparecchi, nello stesso posto della scheda «Pronta a
+ * registrare» (`SchedaFerma`), cosi' premendo REGISTRA le due righe non
+ * si spostano.
  */
 function Scheda({
   figura,
   allarme = false,
+  piede,
   children,
 }: {
   figura: ReactNode;
   allarme?: boolean;
+  piede?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`flex w-117.5 max-w-full items-center gap-6 rounded-2xl border px-7 py-6 ${
+      className={`flex w-117.5 max-w-full flex-col rounded-2xl border ${
         allarme ? "border-transparent bg-allarme-scheda" : "border-border bg-card"
       }`}
     >
-      {figura}
-      <div className="flex min-w-0 flex-1 flex-col gap-2">{children}</div>
+      <div className="flex items-center gap-6 px-7 py-6">
+        {figura}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">{children}</div>
+      </div>
+      {piede && (
+        <div
+          className={`border-t px-5 pt-3 pb-3.5 ${allarme ? "border-white/10" : "border-border"}`}
+        >
+          {piede}
+        </div>
+      )}
     </div>
   );
 }
@@ -236,6 +256,7 @@ function DueLivelliBarre({ livelli }: { livelli: DueLivelli }) {
 export function SchedaRiunione({
   momento,
   livelli = NIENTE,
+  inUso = null,
   onStart,
   isStarting,
   onStop,
@@ -253,9 +274,15 @@ export function SchedaRiunione({
       // cronometro e diventa il messaggio: via le barrette (sono spente, non
       // hanno niente da dire), la scritta grande, e il tempo che resta
       // leggibile piu' piccolo sotto. Il tondo STOP non si sposta mai.
+      // Gli apparecchi restano anche nell'allarme: e' proprio quando serve
+      // sapere quali sono (dal 10-11).
       if (momento.silenzio != null)
         return (
-          <Scheda figura={<Tondone testo="STOP" onClick={onStop} />} allarme>
+          <Scheda
+            figura={<Tondone testo="STOP" onClick={onStop} />}
+            allarme
+            piede={<StrisciaInUso inUso={inUso} allarme />}
+          >
             <div className="text-[34px] leading-[1.1] font-extrabold text-allarme-foreground">
               NON SENTO
               <br />
@@ -271,7 +298,10 @@ export function SchedaRiunione({
           </Scheda>
         );
       return (
-        <Scheda figura={<Tondone testo="STOP" onClick={onStop} />}>
+        <Scheda
+          figura={<Tondone testo="STOP" onClick={onStop} />}
+          piede={<StrisciaInUso inUso={inUso} />}
+        >
           <div className="text-[38px] leading-none font-light tabular-nums">{tempo}</div>
           <DueLivelliBarre livelli={livelli} />
         </Scheda>

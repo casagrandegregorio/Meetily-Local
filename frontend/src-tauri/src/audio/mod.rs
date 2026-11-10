@@ -16,6 +16,7 @@ pub mod diagnostics;
 pub mod ffmpeg_mixer; // NEW: FFmpeg-style adaptive audio mixer
 
 // New simplified audio system
+pub mod apparecchi_in_uso; // i nomi degli apparecchi aperti, per la scheda (10-11)
 pub mod async_logger;
 pub mod batch_processor;
 pub mod buffer_pool;

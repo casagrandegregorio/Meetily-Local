@@ -32,6 +32,7 @@ import { SettingsModals } from "./_components/SettingsModal";
 // nel repo, non montati.
 import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
 import { useLivelliRegistrazione } from "@/hooks/useLivelliRegistrazione";
+import { useApparecchiInUso } from "@/hooks/useApparecchiInUso";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
@@ -259,6 +260,11 @@ export default function Home() {
   // ancora, cioe' in Impostazioni, «Prova il microfono».
   const livelli = useLivelliRegistrazione(momento.tipo === "registra");
 
+  // I due apparecchi che il motore ha aperto davvero, scritti sotto la scheda
+  // mentre registra (dal 10-11). Non quelli delle preferenze: il 18-09 la
+  // scelta non arrivava al motore e la riunione e' uscita muta.
+  const inUso = useApparecchiInUso(momento.tipo === "registra");
+
   // la schermata in allarme: solo mentre registra, e solo se la sentinella
   // dice che non sta entrando niente
   const inAllarme = momento.tipo === "registra" && momento.silenzio != null;
@@ -324,6 +330,7 @@ export default function Home() {
               <SchedaRiunione
                 momento={momento}
                 livelli={livelli}
+                inUso={inUso}
                 onStart={handleStartClick}
                 isStarting={isStarting || isRecordingDisabled}
                 onStop={() => void ferma(recordingState.recordingDuration)}
