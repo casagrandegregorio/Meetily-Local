@@ -553,6 +553,13 @@ jobs:
             Write-Host "sherpa-onnx-c-api.lib present: $($lib.FullName)"
           } else {
             Write-Host "sherpa-onnx-c-api.lib missing after cache restore: forcing sherpa-onnx-sys to rebuild"
+            # the build script skips the download when the prebuilt folder
+            # exists, even if the lib inside is gone (seen 10-11, run
+            # 42847791950): the folder goes too
+            if (Test-Path target/sherpa-onnx-prebuilt) {
+              Write-Host "  removing target/sherpa-onnx-prebuilt"
+              Remove-Item target/sherpa-onnx-prebuilt -Recurse -Force
+            }
             Get-ChildItem -Path target -Recurse -Directory -Filter "sherpa-onnx-sys-*" -ErrorAction SilentlyContinue |
               Where-Object { $_.Parent.Name -in @("build", ".fingerprint") } |
               ForEach-Object { Write-Host "  removing $($_.FullName)"; Remove-Item $_.FullName -Recurse -Force }
