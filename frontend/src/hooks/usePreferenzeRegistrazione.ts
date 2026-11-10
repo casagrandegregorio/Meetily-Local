@@ -14,7 +14,7 @@
 //
 // Piu' copie di questo hook (la scheda e le Impostazioni) si tengono allineate
 // con un evento sulla finestra: chi salva lo dice, gli altri rileggono.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import type { AudioDevice } from "@/components/DeviceSelection";
@@ -36,6 +36,12 @@ export interface PreferenzeRegistrazione {
   salvando: boolean;
   /** scrive nel file e avvisa le altre copie; lancia se il backend dice di no */
   salva: (nuove: Partial<RecordingPreferences>) => Promise<void>;
+  /**
+   * rilegge l'elenco e i predefiniti di Windows: lo chiede il menu quando si
+   * apre, cosi' le cuffie accese dopo (anche a registrazione in corso, 10-11)
+   * compaiono senza riaprire la pagina
+   */
+  rileggiApparecchi: () => void;
 }
 
 export function usePreferenzeRegistrazione(): PreferenzeRegistrazione {
@@ -52,30 +58,37 @@ export function usePreferenzeRegistrazione(): PreferenzeRegistrazione {
     }
   }, []);
 
+  // `vivo` dice se la copia dell'hook c'e' ancora: una risposta che arriva
+  // dopo che la scheda e' sparita non scrive niente
+  const vivo = useRef(true);
+  const leggiApparecchi = useCallback(async () => {
+    try {
+      const elenco = await invoke<AudioDevice[]>("get_audio_devices");
+      if (vivo.current && Array.isArray(elenco)) setApparecchi(elenco);
+    } catch (errore) {
+      console.info("[preferenze] apparecchi non leggibili", errore);
+    }
+    try {
+      const coppia = await invoke<[string | null, string | null]>("get_default_audio_devices");
+      if (vivo.current && Array.isArray(coppia)) setPredefiniti(coppia);
+    } catch (errore) {
+      console.info("[preferenze] predefiniti non leggibili", errore);
+    }
+  }, []);
+
   useEffect(() => {
-    let annullato = false;
+    vivo.current = true;
     void leggiPrefs();
-    void (async () => {
-      try {
-        const elenco = await invoke<AudioDevice[]>("get_audio_devices");
-        if (!annullato && Array.isArray(elenco)) setApparecchi(elenco);
-      } catch (errore) {
-        console.info("[preferenze] apparecchi non leggibili", errore);
-      }
-      try {
-        const coppia = await invoke<[string | null, string | null]>("get_default_audio_devices");
-        if (!annullato && Array.isArray(coppia)) setPredefiniti(coppia);
-      } catch (errore) {
-        console.info("[preferenze] predefiniti non leggibili", errore);
-      }
-    })();
+    void leggiApparecchi();
     const rileggi = () => void leggiPrefs();
     window.addEventListener(EVENTO, rileggi);
     return () => {
-      annullato = true;
+      vivo.current = false;
       window.removeEventListener(EVENTO, rileggi);
     };
-  }, [leggiPrefs]);
+  }, [leggiPrefs, leggiApparecchi]);
+
+  const rileggiApparecchi = useCallback(() => void leggiApparecchi(), [leggiApparecchi]);
 
   const salva = useCallback(
     async (nuove: Partial<RecordingPreferences>) => {
@@ -105,5 +118,6 @@ export function usePreferenzeRegistrazione(): PreferenzeRegistrazione {
     audioPcInUso: prefs?.preferred_system_device ?? predefiniti[1],
     salvando,
     salva,
+    rileggiApparecchi,
   };
 }

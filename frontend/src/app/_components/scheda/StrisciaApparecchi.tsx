@@ -25,7 +25,7 @@
 // menu: il motore chiude e riapre solo quello (`cambia_apparecchio`), con un
 // buco di circa un secondo su quel canale.
 import { useLayoutEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Mic, Volume2, VolumeX } from "lucide-react";
+import { Check, ChevronDown, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 
@@ -87,6 +87,8 @@ interface RigaProps {
   apparecchi: string[];
   disabilitato: boolean;
   onScegli: (nome: string | null) => void;
+  /** quando il menu si apre: si rilegge l'elenco degli apparecchi */
+  onApri: () => void;
   /** solo mentre registra */
   inUso?: InUsoRiga;
 }
@@ -99,6 +101,7 @@ function RigaApparecchio({
   apparecchi,
   disabilitato,
   onScegli,
+  onApri,
   inUso,
 }: RigaProps) {
   const segue = scelto == null;
@@ -157,7 +160,7 @@ function RigaApparecchio({
   );
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(aperto) => aperto && onApri()}>
       {/* il fumetto c'e' sempre, ma si apre solo se il nome non ci sta: se
           cambiasse l'albero la riga rinascerebbe e la misura ripartirebbe */}
       <Tooltip open={lungo && !inUso?.avviso ? undefined : false}>
@@ -188,7 +191,7 @@ function RigaApparecchio({
 }
 
 export function StrisciaApparecchi({ preferenze }: { preferenze: PreferenzeRegistrazione }) {
-  const { prefs, ingressi, uscite, predefiniti, salvando, salva } = preferenze;
+  const { prefs, ingressi, uscite, predefiniti, salvando, salva, rileggiApparecchi } = preferenze;
   const disabilitato = !prefs || salvando;
 
   const cambia = (nuove: Parameters<typeof salva>[0]) =>
@@ -206,6 +209,7 @@ export function StrisciaApparecchi({ preferenze }: { preferenze: PreferenzeRegis
         apparecchi={ingressi.map((d) => d.name)}
         disabilitato={disabilitato}
         onScegli={(nome) => void cambia({ preferred_mic_device: nome })}
+        onApri={rileggiApparecchi}
       />
       <RigaApparecchio
         Icona={Volume2}
@@ -215,6 +219,7 @@ export function StrisciaApparecchi({ preferenze }: { preferenze: PreferenzeRegis
         apparecchi={uscite.map((d) => d.name)}
         disabilitato={disabilitato}
         onScegli={(nome) => void cambia({ preferred_system_device: nome })}
+        onApri={rileggiApparecchi}
       />
     </div>
   );
@@ -224,8 +229,8 @@ type Posto = "microfono" | "audio_pc";
 
 /**
  * Le due righe mentre registra, coi nomi che il motore ha aperto davvero
- * (`useApparecchiInUso`; `inUso` nullo = non li ha ancora detti). Il
- * microfono non puo' mancare: senza, REGISTRA non parte.
+ * (`useApparecchiInUso`; `inUso` nullo = non li ha ancora detti). Un posto
+ * senza apparecchio aperto lo dice in rosso, «non lo sto registrando».
  *
  * Gli stessi menu di prima di REGISTRA, ma la scelta cambia subito
  * l'apparecchio: prima si chiede al motore (`cambia_apparecchio`), e solo se
@@ -240,9 +245,13 @@ export function StrisciaInUso({
   inUso: ApparecchiInUso | null;
   allarme?: boolean;
 }) {
-  const { prefs, ingressi, uscite, predefiniti, salvando, salva } = usePreferenzeRegistrazione();
+  const { prefs, ingressi, uscite, predefiniti, salvando, salva, rileggiApparecchi } =
+    usePreferenzeRegistrazione();
   const [cambiando, setCambiando] = useState<Posto | null>(null);
   const disabilitato = !prefs || salvando || cambiando != null;
+  // il microfono manca solo se un cambio e' fallito e quello di prima non si
+  // e' riaperto; l'audio del PC anche quando non si e' aperto alla partenza
+  const senzaMicrofono = inUso != null && inUso.microfono == null;
   const senzaAudioPc = inUso != null && inUso.audioPc == null;
 
   const cambia = async (posto: Posto, nome: string | null) => {
@@ -251,15 +260,25 @@ export function StrisciaInUso({
     const scelta = posto === "microfono" ? prefs?.preferred_mic_device : prefs?.preferred_system_device;
     // gia' aperto e gia' scelto: niente da cambiare, e niente buco sul file
     if ((nome ?? predefinito) === aperto && nome === (scelta ?? null)) return;
+    const cosa = posto === "microfono" ? "Microfono" : "Audio del PC";
     setCambiando(posto);
     try {
-      await invoke(COMANDO_CAMBIA_APPARECCHIO, { posto, nome });
-      await salva(posto === "microfono" ? { preferred_mic_device: nome } : { preferred_system_device: nome });
-    } catch (errore) {
-      toast.error(
-        posto === "microfono" ? "Microfono non cambiato" : "Audio del PC non cambiato",
-        { description: getErrorMessage(errore), duration: 10000 },
-      );
+      try {
+        await invoke(COMANDO_CAMBIA_APPARECCHIO, { posto, nome });
+      } catch (errore) {
+        // la frase del motore dice gia' cosa sta registrando adesso
+        toast.error(`${cosa} non cambiato`, { description: getErrorMessage(errore), duration: 10000 });
+        return;
+      }
+      try {
+        await salva(posto === "microfono" ? { preferred_mic_device: nome } : { preferred_system_device: nome });
+      } catch (errore) {
+        // l'apparecchio e' cambiato davvero: manca solo il ricordo per la prossima
+        toast.warning(`${cosa} cambiato, ma la scelta non è salvata`, {
+          description: `La prossima registrazione partirà con quello di prima. ${getErrorMessage(errore)}`,
+          duration: 10000,
+        });
+      }
     } finally {
       setCambiando(null);
     }
@@ -268,16 +287,18 @@ export function StrisciaInUso({
   return (
     <div className="flex flex-col gap-1.5">
       <RigaApparecchio
-        Icona={Mic}
+        Icona={senzaMicrofono ? MicOff : Mic}
         etichetta="Microfono"
         scelto={prefs?.preferred_mic_device ?? null}
         predefinito={predefiniti[0]}
         apparecchi={ingressi.map((d) => d.name)}
         disabilitato={disabilitato}
         onScegli={(nome) => void cambia("microfono", nome)}
+        onApri={rileggiApparecchi}
         inUso={{
-          nome: inUso == null ? null : (inUso.microfono ?? "—"),
-          tinta: "text-ambra",
+          nome: inUso?.microfono ?? null,
+          avviso: senzaMicrofono && cambiando !== "microfono" ? "non lo sto registrando" : undefined,
+          tinta: senzaMicrofono ? "text-red-400" : "text-ambra",
           allarme,
           cambiando: cambiando === "microfono",
         }}
@@ -290,6 +311,7 @@ export function StrisciaInUso({
         apparecchi={uscite.map((d) => d.name)}
         disabilitato={disabilitato}
         onScegli={(nome) => void cambia("audio_pc", nome)}
+        onApri={rileggiApparecchi}
         inUso={{
           nome: inUso?.audioPc ?? null,
           avviso: senzaAudioPc && cambiando !== "audio_pc" ? "non lo sto registrando" : undefined,

@@ -94,10 +94,15 @@ let inUsoFinto: { microfono: string | null; audio_pc: string | null } | null = n
  */
 async function cambiaApparecchioFinto({ posto, nome }: { posto?: string; nome?: string | null }) {
   await new Promise((fatto) => setTimeout(fatto, 1000));
-  if (nome === "Speakers (Realtek Audio)")
-    throw "Non si apre: Device not found or no compatible configuration available: Speakers (Realtek Audio)";
   const [micDefault, pcDefault] = risposteFinte.get_default_audio_devices as [string, string];
   const prima = apparecchiInUsoFinti() ?? { microfono: micDefault, audio_pc: pcDefault };
+  // le stesse frasi di `cambia_apparecchio` nel motore
+  if (nome === "Speakers (Realtek Audio)") {
+    const resta = posto === "microfono" ? prima.microfono : prima.audio_pc;
+    throw resta
+      ? `«${nome}» non si apre: la registrazione continua con «${resta}».`
+      : `«${nome}» non si apre: questo canale resta senza registrazione. Scegline un altro dal menu.`;
+  }
   inUsoFinto =
     posto === "microfono"
       ? { ...prima, microfono: nome ?? micDefault }

@@ -1207,28 +1207,61 @@ pub async fn cambia_apparecchio<R: Runtime>(
         }
         .map_err(|e| format!("Windows non ha un predefinito: {}", e))?,
     };
+    let nome_nuovo = nuovo.name.clone();
 
     // come `attempt_device_reconnect`: il manager sta dietro un Mutex di std,
     // che non si puo' tenere attraverso un `.await` in un comando asincrono
-    let (esito, nomi) = tokio::task::spawn_blocking(move || {
+    let (esito, prima, nomi) = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
             let mut manager_guard = RECORDING_MANAGER.lock().unwrap();
             match manager_guard.as_mut() {
                 Some(manager) => {
+                    let prima = manager.apparecchi_aperti();
                     let esito = manager.cambia_apparecchio(tipo_stream, nuovo).await;
-                    (esito, Some(manager.apparecchi_aperti()))
+                    (esito, Some(prima), Some(manager.apparecchi_aperti()))
                 }
-                None => (Err(anyhow::anyhow!("Non sta registrando")), None),
+                None => (Err(anyhow::anyhow!("Non sta registrando")), None, None),
             }
         })
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?;
 
+    // senza manager la registrazione e' finita nel frattempo (STOP)
+    if nomi.is_none() {
+        return esito.map_err(|_| "La registrazione non c'è più: niente da cambiare.".to_string());
+    }
+    // quello che c'era e quello che c'e' adesso in quel posto
+    let di_quel_posto = |coppia: &Option<(Option<String>, Option<String>)>| {
+        coppia.as_ref().and_then(|(microfono, audio_pc)| match tipo_stream {
+            TipoStream::Microphone => microfono.clone(),
+            TipoStream::System => audio_pc.clone(),
+        })
+    };
+    let aperto_prima = di_quel_posto(&prima);
+    let aperto_ora = di_quel_posto(&nomi);
     if let Some(nomi) = nomi {
         super::apparecchi_in_uso::pubblica(&app, nomi);
     }
-    esito.map_err(|e| format!("Non si apre: {}", e))
+    // il motivo tecnico va nel registro (`sostituisci`); alla pagina una frase
+    // che dice cosa sta registrando adesso
+    esito.map_err(|e| {
+        warn!("Cambio di {} non riuscito: {}", posto, e);
+        match (aperto_ora, aperto_prima) {
+            (Some(n), _) => format!(
+                "«{}» non si apre: la registrazione continua con «{}».",
+                nome_nuovo, n
+            ),
+            (None, Some(_)) => format!(
+                "«{}» non si apre, e quello di prima non si è riaperto: questo canale adesso non si registra. Scegline un altro dal menu.",
+                nome_nuovo
+            ),
+            (None, None) => format!(
+                "«{}» non si apre: questo canale resta senza registrazione. Scegline un altro dal menu.",
+                nome_nuovo
+            ),
+        }
+    })
 }
 
 /// Manually trigger device reconnection attempt
