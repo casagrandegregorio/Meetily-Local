@@ -27,7 +27,7 @@ use tauri_plugin_store::StoreExt;
 use crate::audio::recording_preferences::load_recording_preferences;
 
 const AUDIO: &str = "audio.mp4";
-const TESTO: &str = "trascrizione.md";
+pub(crate) const TESTO: &str = "trascrizione.md";
 const VOCI: &str = "voci.json";
 const METADATA: &str = "metadata.json";
 const LIVELLO: &str = "livello.json";
@@ -127,7 +127,7 @@ fn voci(dir: &Path) -> (u32, Vec<String>) {
     (v.voci.len() as u32, con_nome.into_iter().map(|(_, n)| n).collect())
 }
 
-async fn cartella_registrazioni<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+pub(crate) async fn cartella_registrazioni<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     load_recording_preferences(app)
         .await
         .map(|p| p.save_folder)
@@ -162,7 +162,7 @@ fn nome(dir: &Path) -> String {
 
 /// Un nome di cartella che resta dentro la cartella delle registrazioni:
 /// niente separatori, niente `..`.
-fn nome_sicuro(folder: &str) -> Result<&str, String> {
+pub(crate) fn nome_sicuro(folder: &str) -> Result<&str, String> {
     if folder.is_empty()
         || folder.contains(|c| c == '/' || c == '\\')
         || folder == "."
@@ -265,6 +265,13 @@ pub async fn read_transcript<R: Runtime>(
 /// scrivere niente: il file da solo non lo direbbe).
 #[derive(Default)]
 pub struct InCorso(Mutex<HashSet<String>>);
+
+/// Su questa cartella sta girando una trascrizione, lanciata da questa
+/// sessione o da prima che l'app fosse riaperta?
+pub(crate) fn si_trascrive(in_corso: &InCorso, folder: &str, dir: &Path) -> bool {
+    let vivo = in_corso.0.lock().map(|set| set.contains(folder)).unwrap_or(false);
+    vivo || vivo_su_disco(dir)
+}
 
 const AVANZAMENTO: &str = "avanzamento.json";
 const REGISTRO: &str = "trascrizione.log";
@@ -451,6 +458,7 @@ pub async fn start_transcription<R: Runtime>(
     let app2 = app.clone();
     let folder2 = folder.clone();
     let pid_file = dir.join(PID);
+    let dir2 = dir.clone();
     std::thread::spawn(move || {
         let esito = figlio.wait();
         let ok = esito.as_ref().map(|s| s.success()).unwrap_or(false);
@@ -459,9 +467,24 @@ pub async fn start_transcription<R: Runtime>(
         if let Ok(mut set) = app2.state::<InCorso>().0.lock() {
             set.remove(&folder2);
         }
+        // il testo nel progetto della riunione, se ne ha uno (10-11); se la
+        // copia non riesce il testo resta qui, e l'app lo dice
+        let (copiato_in, copia_errore) = match crate::progetti::copia_a_fine_trascrizione(&dir2, &folder2) {
+            Some(Ok(dove)) => (Some(dove), None),
+            Some(Err(e)) => {
+                log::warn!("Copia nel progetto non riuscita per {:?}: {}", folder2, e);
+                (None, Some(e))
+            }
+            None => (None, None),
+        };
         let _ = app2.emit(
             "transcription-finished",
-            serde_json::json!({ "folder": folder2, "ok": ok }),
+            serde_json::json!({
+                "folder": folder2,
+                "ok": ok,
+                "copiato_in": copiato_in,
+                "copia_errore": copia_errore,
+            }),
         );
     });
     Ok(())

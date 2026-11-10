@@ -6,6 +6,7 @@ import { useTrascritte } from "@/hooks/useTrascritte";
 import { Spinner } from "@/components/ui/spinner";
 import { chiCera, durata, giorno } from "@/types/trascritta";
 
+import { RigaProgetto } from "./RigaProgetto";
 import { StrisciaApparecchi } from "./StrisciaApparecchi";
 
 interface SchedaFermaProps {
@@ -42,7 +43,7 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
 
   return (
     <div className="flex w-full flex-col items-center justify-center gap-4 px-6 py-10">
-      <div className="flex w-117.5 max-w-full flex-col rounded-2xl border border-border bg-card">
+      <div className="scheda-viva flex w-117.5 max-w-full flex-col rounded-2xl border border-border">
         <div className="flex items-center gap-6 px-7 py-6">
           <button
             type="button"
@@ -52,7 +53,7 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
             className={`flex size-27 flex-none items-center justify-center rounded-full text-sm font-bold tracking-wide transition-all duration-150 ${
               disabilitato
                 ? "cursor-not-allowed bg-muted text-muted-foreground"
-                : "bg-ambra text-ambra-foreground hover:scale-105 hover:ring-8 hover:ring-ambra/15 active:scale-95"
+                : "tondo-vivo bg-ambra text-ambra-foreground hover:scale-105 active:scale-95"
             }`}
           >
             {isStarting ? <Spinner size="lg" /> : "REGISTRA"}
@@ -71,8 +72,10 @@ export function SchedaFerma({ onStart, isStarting }: SchedaFermaProps) {
             )}
           </div>
         </div>
-        <div className="border-t border-border px-5 pt-3 pb-3.5">
+        <div className="flex flex-col gap-1.5 border-t border-border px-5 pt-3 pb-3.5">
           <StrisciaApparecchi preferenze={preferenze} />
+          {/* il progetto della riunione che sta per partire (10-11) */}
+          <RigaProgetto />
         </div>
       </div>
     </div>

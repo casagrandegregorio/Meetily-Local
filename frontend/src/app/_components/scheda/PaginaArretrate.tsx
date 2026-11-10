@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { Trash2 } from "lucide-react";
 
 import type { Arretrata } from "@/types/arretrata";
 import { finito, type Lavoro } from "@/contexts/LavoriContext";
 import { durata } from "@/types/trascritta";
+import { Quando } from "./Quando";
 import { LettoreRiga } from "@/app/_components/lettore/Lettore";
 
 import { Anellino, paroleLavoro, tintaLavoro } from "./RigaLavoro";
+import { EtichettaProgetto } from "./RigaProgetto";
 
 interface PaginaArretrateProps {
   arretrate: Arretrata[];
@@ -61,9 +63,9 @@ export function PaginaArretrate({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-baseline gap-3 border-b border-border px-6 py-4">
-        <h2 className="text-base font-semibold">Da trascrivere</h2>
+        <h2 className="text-lg font-semibold tracking-tight">Da trascrivere</h2>
         {arretrate.length > 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="font-mono text-[13px] tabular-nums text-muted-foreground">
             {daLavorare.length > 0
               ? `${daLavorare.length} · ${durata(minutiTotali)} · ${
                   minutiDiLavoro < 1
@@ -78,8 +80,8 @@ export function PaginaArretrate({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6">
-        {arretrate.map((a) => {
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+        {arretrate.map((a, i) => {
           const lavoro = lavoroDi(a.folder);
           const spenta = muta(a) && !lavoro;
           const chiede = daConfermare === a.folder;
@@ -87,17 +89,25 @@ export function PaginaArretrate({
           return (
             <div
               key={a.folder}
-              className="flex items-center gap-3 border-b border-border/60 py-3 last:border-b-0"
+              style={{ "--i": i } as CSSProperties}
+              className="riga-elenco flex items-center gap-3 px-3 py-2.5"
             >
               <LettoreRiga folder={a.folder} />
-              <div
-                className={`min-w-0 flex-1 truncate text-sm ${spenta ? "text-muted-foreground/60" : ""}`}
-                title={a.folder}
-              >
-                {a.folder}
+              {/* «10 nov · 09.07–09.50» e sotto il progetto; il nome intero
+                  della cartella passandoci sopra (10-11) */}
+              <div className="flex min-w-0 flex-1 flex-col items-start">
+                <Quando folder={a.folder} spenta={spenta} />
+                <EtichettaProgetto
+                  folder={a.folder}
+                  spenta={
+                    lavoro
+                      ? "Sta trascrivendo: il progetto si cambia quando ha finito."
+                      : undefined
+                  }
+                />
               </div>
               <div
-                className={`text-xs tabular-nums ${spenta ? "text-muted-foreground/60" : "text-muted-foreground"}`}
+                className={`sfuma font-mono text-[13px] tabular-nums ${spenta ? "text-muted-foreground/70" : "text-muted-foreground/80"}`}
               >
                 {durata(a.minutes)}
               </div>
@@ -117,12 +127,16 @@ export function PaginaArretrate({
                 </div>
               ) : (
                 <>
-                  {parole && <span className="text-xs text-destructive/80">{parole}</span>}
+                  {parole && (
+                    <span className="rounded-full border border-red-500/35 bg-red-500/15 px-2.5 py-0.5 text-[12.5px] font-medium whitespace-nowrap text-red-300">
+                      {parole}
+                    </span>
+                  )}
                   {!spenta && (
                     <button
                       type="button"
                       onClick={() => onTrascrivi(a)}
-                      className="rounded-full border border-ambra px-3.5 py-1 text-xs font-semibold tracking-wide text-ambra hover:bg-ambra hover:text-ambra-foreground"
+                      className="rounded-full border border-ambra/60 px-4 py-1.5 text-[12.5px] font-semibold tracking-[0.12em] text-ambra transition-all duration-200 hover:border-ambra hover:bg-ambra hover:text-ambra-foreground hover:shadow-[0_0_18px_-2px_hsl(var(--ambra)/0.6)]"
                     >
                       TRASCRIVI
                     </button>
@@ -154,7 +168,7 @@ export function PaginaArretrate({
                       onClick={() => setDaConfermare(a.folder)}
                       aria-label="Nel Cestino"
                       title="Nel Cestino di Windows"
-                      className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+                      className="solo-sopra rounded-full p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                     >
                       <Trash2 className="size-4" />
                     </button>

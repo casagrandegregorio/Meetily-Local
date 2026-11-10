@@ -83,11 +83,11 @@ export function LettoreRiga({ folder }: { folder: string }) {
           void l.alterna(folder);
         }}
         aria-label={suona ? "Pausa" : "Riascolta"}
-        className={`flex size-6 items-center justify-center rounded-full border border-ambra ${
+        className={`tasto-play flex size-7.5 items-center justify-center rounded-full border border-ambra ${
           suona ? "bg-ambra text-ambra-foreground" : "text-ambra hover:bg-ambra/15"
         }`}
       >
-        {suona ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+        {suona ? <Pause className="size-3.5" /> : <Play className="size-3.5 translate-x-px" />}
       </button>
       {mio && (
         <span

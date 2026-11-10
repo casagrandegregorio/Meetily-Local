@@ -85,7 +85,17 @@ export default function RootLayoutClient({
         </ProviderStack>
       </div>
 
-      <Toaster position="bottom-center" richColors closeButton />
+      {/* scuri come l'app (10-11): senza `theme` sonner li faceva chiari */}
+      <Toaster
+        position="bottom-center"
+        theme="dark"
+        richColors
+        closeButton
+        toastOptions={{
+          className: "!rounded-xl !border-white/10 !shadow-2xl !shadow-black/50 backdrop-blur-md",
+          classNames: { actionButton: "!rounded-full !bg-ambra/15 !text-ambra hover:!bg-ambra hover:!text-ambra-foreground" },
+        }}
+      />
     </>
   );
 }

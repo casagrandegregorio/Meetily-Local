@@ -9,6 +9,8 @@
 //
 // Non entra mai nell'app vera: si installa solo se `__TAURI_INTERNALS__` manca,
 // cioe' quando NON siamo dentro Tauri.
+import { conProgetto, leggiNome, progettoDellaCartella } from "./nome-riunione";
+
 const oggi = new Date();
 const quandoFinto = (giorniFa: number) =>
   new Date(oggi.getTime() - giorniFa * 86400000).toISOString();
@@ -73,14 +75,107 @@ function avviaLivelliFinti() {
   }, 100);
 }
 
-/** La cartella che Meetily creerebbe adesso: `Meeting AAAA-MM-GG_hh-mm-ss_...`. */
+/** La cartella alla partenza, come il motore (`nome_riunione`, 30-09): `10-11-2026 · 09.07`. */
 function cartellaFintaDiAdesso(): string {
   const d = new Date();
   const z = (n: number) => String(n).padStart(2, "0");
-  const locale = `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-  const ora = `${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`;
-  const utc = `${z(d.getUTCHours())}-${z(d.getUTCMinutes())}`;
-  return `Meeting ${locale}_${ora}_${locale}_${utc}`;
+  return `${z(d.getDate())}-${z(d.getMonth() + 1)}-${d.getFullYear()} · ${z(d.getHours())}.${z(d.getMinutes())}`;
+}
+
+/**
+ * La cartella allo Stop: inizio, fine, durata e il progetto scelto
+ * (`… · 09.07–09.50 · 0h43 · PROGETTO-GAMMA`). La durata e' quella vera, arrotondata
+ * al minuto come nel motore: deve dire lo stesso del «Registrata · N min».
+ */
+function cartellaFintaAlloStop(inizio: string, dal: number, progetto: string | null): string {
+  const minuti = Math.round((Date.now() - dal) / 60000);
+  const [giorno, ora] = inizio.split(" · ");
+  const [h, m] = ora.split(".").map(Number);
+  const fine = new Date(2000, 0, 1, h, m + minuti);
+  const z = (n: number) => String(n).padStart(2, "0");
+  const base = `${giorno} · ${ora}–${z(fine.getHours())}.${z(fine.getMinutes())} · ${Math.floor(minuti / 60)}h${z(minuti % 60)}`;
+  return progetto ? `${base} · ${progetto}` : base;
+}
+
+// Le cartelle di Desktop\PROJECTS, coi nomi di fantasia: il fork e' pubblico.
+// Il primo ha la cartella delle riunioni in profondita', il secondo una
+// `meetings`, il terzo nessuna (l'app creera' `riunioni`).
+const PROGETTI_FINTI = [
+  { nome: "PROGETTO-GAMMA", cartella_riunioni: "gestione\\meeting" },
+  { nome: "PROGETTO-ALFA", cartella_riunioni: "management\\meetings" },
+  { nome: "PROGETTO-BETA", cartella_riunioni: null },
+];
+/** la scelta per la registrazione che parte o che e' in corso; allo Stop torna `null` */
+let progettoFinto: string | null = null;
+
+/** Dove va il testo di una cartella, come `destinazione` dell'app; `null` = senza progetto. */
+function cartellaDelProgettoFinta(folder: string): string | null {
+  const nome = progettoDellaCartella(folder);
+  if (!nome) return null;
+  const p = PROGETTI_FINTI.find((x) => x.nome === nome);
+  return p
+    ? `PROJECTS\\${p.nome}\\${p.cartella_riunioni ?? "riunioni"}`
+    : `PROJECTS\\_RIUNIONI_SENZA_PROGETTO\\${nome}`;
+}
+
+/** Ha gia' il suo testo: fra le trascritte, o trascritta adesso nel finto. */
+function haTestoFinto(folder: string): boolean {
+  if (testiButtati.has(folder)) return false;
+  return (
+    TRASCRITTE_FINTE.some((t) => t.folder === folder) || trascrizioniFinte.get(folder)?.fase === "fatto"
+  );
+}
+
+/** Una cartella cambia nome: la seguono tutti i pezzi del finto che la ricordano. */
+function rinominaNelFinto(vecchia: string, nuova: string) {
+  if (vecchia === nuova) return;
+  for (const a of ARRETRATE_FINTE) if (a.folder === vecchia) a.folder = nuova;
+  for (const t of TRASCRITTE_FINTE) if (t.folder === vecchia) t.folder = nuova;
+  const t = trascrizioniFinte.get(vecchia);
+  if (t) (trascrizioniFinte.delete(vecchia), trascrizioniFinte.set(nuova, t));
+  const c = copieFinte.get(vecchia);
+  if (c) (copieFinte.delete(vecchia), copieFinte.set(nuova, c));
+  for (const s of [cestinoFinto, testiButtati]) if (s.delete(vecchia)) s.add(nuova);
+  for (const [k, v] of [...fogliFinti]) {
+    if (k.startsWith(`${vecchia}/`)) (fogliFinti.delete(k), fogliFinti.set(nuova + k.slice(vecchia.length), v));
+  }
+  nomeSulDisco.set(nuova, sulDisco(vecchia));
+  nomeSulDisco.delete(vecchia);
+}
+
+/**
+ * Il progetto di una registrazione gia' ferma (`cambia_progetto_riunione`):
+ * la cartella cambia nome e, se il testo c'e', la copia si sposta. La copia
+ * di prima va nel Cestino se e' ancora uguale all'originale, resta dov'e' se
+ * Greg l'ha modificata; se non c'e' piu', niente da togliere. Le tre cose si
+ * vedono nelle riunioni finte di «Trascritte» (vedi `progettiFintiIniziali`).
+ */
+async function cambiaProgettoRiunioneFinto({ folder, nome }: { folder?: string; nome?: string | null }) {
+  if (!folder) throw new Error("cambia_progetto_riunione: manca `folder`");
+  await new Promise((fatto) => setTimeout(fatto, 400));
+  // un «Annulla» vecchio, dopo che il nome e' cambiato ancora: la stessa frase del motore
+  const esiste = [...ARRETRATE_FINTE, ...TRASCRITTE_FINTE].some((x) => x.folder === folder);
+  if (!esiste || cestinoFinto.has(folder)) {
+    throw `«${folder}» non c'è più con questo nome: forse l'hai già cambiato. Scegli il progetto dalla riga.`;
+  }
+  const lavoro = trascrizioniFinte.get(folder);
+  if (lavoro && lavoro.fase !== "fatto" && lavoro.fase !== "muta") {
+    throw "Si sta trascrivendo: il progetto si cambia quando ha finito.";
+  }
+  const nuova = conProgetto(folder, nome ?? null);
+  const testo = haTestoFinto(folder);
+  const prima = copieFinte.get(folder);
+  rinominaNelFinto(folder, nuova);
+  if (!testo) return { folder: nuova, testo: null };
+
+  copieFinte.delete(nuova);
+  const vecchia = !prima ? "nessuna" : prima.sparita ? "sparita" : prima.toccata ? "lasciata" : "cestino";
+  if (prima && vecchia === "lasciata") copieLasciate.add(`${prima.dove}|${folder}`);
+  const dove = cartellaDelProgettoFinta(nuova);
+  // tornando dove c'e' ancora la copia modificata, non la si copre: resta la sua
+  const ritrovata = dove != null && copieLasciate.delete(`${dove}|${nuova}`);
+  if (dove) copieFinte.set(nuova, { dove, toccata: ritrovata });
+  return { folder: nuova, testo: { copiato_in: dove, ritrovata, vecchia, vecchia_in: prima?.dove ?? null } };
 }
 
 /** Gli apparecchi dopo un cambio a registrazione in corso; `null` = nessun cambio. */
@@ -148,8 +243,17 @@ function avviaRegistrazioneFinta() {
 }
 
 function fermaRegistrazioneFinta() {
-  const folder = registrazioneFinta?.folder;
+  const folder = registrazioneFinta
+    ? cartellaFintaAlloStop(registrazioneFinta.folder, registrazioneFinta.dal, progettoFinto)
+    : undefined;
+  // la registrazione nuova entra in «Da trascrivere», come nel vero
+  if (folder && registrazioneFinta) {
+    const minutes = Math.round((Date.now() - registrazioneFinta.dal) / 60000);
+    ARRETRATE_FINTE.push({ folder, minutes, silent: false, percento_voce: 90 });
+  }
   registrazioneFinta = null;
+  // la riunione dopo puo' essere di un altro progetto
+  progettoFinto = null;
   inUsoFinto = null;
   setTimeout(
     () =>
@@ -180,7 +284,22 @@ interface TrascrizioneFinta {
   timer?: ReturnType<typeof setTimeout>;
 }
 const trascrizioniFinte = new Map<string, TrascrizioneFinta>();
-const ARRETRATE_FINTE = [
+// Le copie del testo nelle cartelle dei progetti: dove stanno, se Greg le ha
+// modificate, se qualcuno le ha tolte a mano (10-11).
+const copieFinte = new Map<string, { dove: string; toccata?: boolean; sparita?: boolean }>();
+// il nome che la cartella ha sul disco vero, per il servetto della 3119:
+// nel finto il progetto cambia il nome solo in memoria
+const nomeSulDisco = new Map<string, string>();
+// le copie modificate lasciate indietro: «cartella del progetto|nome della riunione»
+const copieLasciate = new Set<string>();
+const sulDisco = (folder: string) => nomeSulDisco.get(folder) ?? folder;
+const ARRETRATE_FINTE: {
+  folder: string;
+  minutes: number;
+  silent: boolean;
+  percento_voce: number;
+  ricomposta?: boolean;
+}[] = [
   { folder: "Meeting 2026-07-23_11-34-54_2026-07-23_09-34", minutes: 64, silent: true, percento_voce: 0 },
   { folder: "audio_2026-07-23_10-43", minutes: 64, silent: true, percento_voce: 0 },
   { folder: "audio_2026-07-23_10-41", minutes: 64, silent: true, percento_voce: 0 },
@@ -214,10 +333,13 @@ function avviaTrascrizioneFinta({ folder }: { folder?: string }) {
       poi?.();
     }, dopoMs);
   };
+  // a testo pronto la copia nel progetto, e l'evento dice dov'e' andata
   const fine = (fase: "fatto" | "muta") =>
-    passa(fase, fase === "muta" ? 1500 : 4000, () =>
-      emettiFinto("transcription-finished", { folder, ok: fase === "fatto" }),
-    );
+    passa(fase, fase === "muta" ? 1500 : 4000, () => {
+      const dove = fase === "fatto" ? cartellaDelProgettoFinta(folder) : null;
+      if (dove) copieFinte.set(folder, { dove });
+      emettiFinto("transcription-finished", { folder, ok: fase === "fatto", copiato_in: dove });
+    });
   if (arretrata?.silent) {
     passa("avviata", 0, () => fine("muta"));
   } else {
@@ -281,7 +403,7 @@ const preferenzeFinte: Record<string, unknown> = {
 // due riunioni finte, coi nomi di fantasia gia' in uso nel progetto
 const risposteFinte: Record<string, unknown> = {
   api_get_meetings: [
-    { id: "finta-1", title: "Riunione CLEANER", updated_at: quandoFinto(0),
+    { id: "finta-1", title: "Riunione PROGETTO-GAMMA", updated_at: quandoFinto(0),
       created_at: quandoFinto(0) },
     { id: "finta-2", title: "Box termiche - ESATAN", updated_at: quandoFinto(3),
       created_at: quandoFinto(3) },
@@ -300,6 +422,14 @@ const risposteFinte: Record<string, unknown> = {
   // gli apparecchi che la registrazione ha aperto davvero (dal 10-11)
   apparecchi_in_uso: () => apparecchiInUsoFinti(),
   cambia_apparecchio: cambiaApparecchioFinto,
+  // il progetto della riunione (dal 10-11)
+  elenca_progetti: () => PROGETTI_FINTI.map((p) => ({ ...p })),
+  progetto_scelto: () => progettoFinto,
+  imposta_progetto: ({ nome }: { nome?: string | null }) => {
+    progettoFinto = nome ?? null;
+    return null;
+  },
+  cambia_progetto_riunione: cambiaProgettoRiunioneFinto,
   // il file delle preferenze, tenuto in memoria: la scelta fatta sulla
   // scheda si rivede nelle Impostazioni, e viceversa (18-09)
   get_recording_preferences: () => ({ ...preferenzeFinte }),
@@ -374,8 +504,13 @@ const risposteFinte: Record<string, unknown> = {
   // `trascrivi/registrazioni.md`; voci e nomi riconosciuti da
   // `trascrivi/arretrate.md` (stato al 06-09). I nomi sono quelli di fantasia
   // gia' in uso nel progetto. L'ora viene dal nome della cartella.
-  list_transcribed_recordings: () =>
-    TRASCRITTE_FINTE.filter((t) => !cestinoFinto.has(t.folder) && !testiButtati.has(t.folder)),
+  list_transcribed_recordings: () => [
+    ...TRASCRITTE_FINTE.filter((t) => !cestinoFinto.has(t.folder) && !testiButtati.has(t.folder)),
+    // quelle trascritte adesso nel finto
+    ...ARRETRATE_FINTE.filter((a) => trascrizioniFinte.get(a.folder)?.fase === "fatto").map((a) =>
+      trascritta(a.folder, a.minutes, 2, ["Greg"]),
+    ),
+  ],
   // Il testo VERO di una riunione, letto dal disco. Il browser non puo'
   // aprire un file, quindi lo chiede a un servetto che serve la cartella
   // delle registrazioni (vedi il MANUALE, «la faccia nel browser»):
@@ -409,11 +544,11 @@ const risposteFinte: Record<string, unknown> = {
   // finto lascia tutto com'e'), nell'app vera e' un percorso sul disco
   recording_audio_path: ({ folder }: { folder?: string }) => {
     if (!folder) throw new Error("recording_audio_path: manca `folder`");
-    return `http://127.0.0.1:3119/${encodeURIComponent(folder)}/audio.mp4`;
+    return `http://127.0.0.1:3119/${encodeURIComponent(sulDisco(folder))}/audio.mp4`;
   },
   read_transcript: async ({ folder }: { folder?: string }) => {
     if (!folder) throw new Error("read_transcript: manca `folder`");
-    const via = `http://localhost:3119/${encodeURIComponent(folder)}/trascrizione.md`;
+    const via = `http://localhost:3119/${encodeURIComponent(sulDisco(folder))}/trascrizione.md`;
     const risposta = await fetch(via);
     if (!risposta.ok) {
       throw new Error(
@@ -435,12 +570,32 @@ function trascritta(
   voices: number,
   speakers: string[],
 ) {
-  const m = folder.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})/);
-  const recorded_at = m
-    ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).toISOString()
-    : "";
+  const inizio = leggiNome(folder).inizio;
+  const recorded_at = inizio ? inizio.toISOString() : "";
   return { folder, recorded_at, minutes, voices, speakers };
 }
+
+/**
+ * Tre riunioni finte di «Trascritte» hanno gia' un progetto e una copia, per
+ * vedere i tre casi del cambio: la copia ancora uguale (va nel Cestino),
+ * quella modificata da Greg (resta), quella tolta a mano (niente da togliere).
+ * Una di «Da trascrivere» ha il progetto ma niente testo.
+ */
+function progettiFintiIniziali() {
+  const casi: [string, string, { toccata?: boolean; sparita?: boolean } | null][] = [
+    [TRASCRITTE_FINTE[0].folder, "PROGETTO-GAMMA", {}],
+    [TRASCRITTE_FINTE[1].folder, "PROGETTO-ALFA", { toccata: true }],
+    [TRASCRITTE_FINTE[3].folder, "PROGETTO-DELTA", { sparita: true }],
+    [ARRETRATE_FINTE[3].folder, "PROGETTO-BETA", null],
+  ];
+  for (const [folder, progetto, copia] of casi) {
+    const nuova = conProgetto(folder, progetto);
+    rinominaNelFinto(folder, nuova);
+    const dove = cartellaDelProgettoFinta(nuova);
+    if (copia && dove) copieFinte.set(nuova, { dove, ...copia });
+  }
+}
+progettiFintiIniziali();
 
 export function installaTauriFinto() {
   if (typeof window === "undefined") return;

@@ -827,7 +827,8 @@ pub async fn stop_recording<R: Runtime>(
         drop(manager);
         match (salvata, meeting_folder) {
             (true, Some(dir)) => {
-                let nuova = crate::nome_riunione::rinomina_alla_fine(&dir);
+                let progetto = crate::progetti::prendi_scelto();
+                let nuova = crate::nome_riunione::rinomina_alla_fine_con(&dir, progetto.as_deref());
                 let nome = nuova
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -845,6 +846,8 @@ pub async fn stop_recording<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
     super::apparecchi_in_uso::azzera();
+    // la scelta del progetto vale per una registrazione sola (10-11)
+    let _ = crate::progetti::prendi_scelto();
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.

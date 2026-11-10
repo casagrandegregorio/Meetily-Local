@@ -1,75 +1,35 @@
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 
 /**
- * Shows the recording notification toast with compliance message.
- * Checks user preferences and displays a dismissible toast with:
- * - notice to inform participants
- * - "Don't show again" checkbox
- * - Acknowledgment button
+ * L'avviso all'avvio della registrazione: ricordarsi di dire a chi partecipa
+ * che la riunione e' registrata.
  *
- * @returns Promise<void> - Resolves when notification is shown or skipped
+ * Era il riquadro bianco di Meetily, in inglese, con una casella e un
+ * pulsante largo, in basso a destra per dieci secondi. Il 10-11 Greg: «il
+ * messaggio sotto non è bello». Adesso e' un avviso scuro come gli altri, in
+ * italiano, che sparisce da solo; «Non dirmelo più» lo spegne per sempre
+ * (la stessa preferenza di prima, `show_recording_notification`).
  */
 export async function showRecordingNotification(): Promise<void> {
   try {
     const { Store } = await import("@tauri-apps/plugin-store");
     const store = await Store.load("preferences.json");
-    const showNotification =
-      (await store.get<boolean>("show_recording_notification")) ?? true;
+    const showNotification = (await store.get<boolean>("show_recording_notification")) ?? true;
+    if (!showNotification) return;
 
-    if (showNotification) {
-      let dontShowAgain = false;
-
-      const toastId = toast.info("🔴 Recording Started", {
-        description: (
-          <div className="min-w-70 space-y-3">
-            <p className="text-sm font-medium text-foreground">
-              Inform all participants this meeting is being recorded.
-            </p>
-            <label
-              className="
-              flex cursor-pointer items-center gap-2 rounded-md p-2 text-sm
-              transition-colors
-              hover:bg-info/15
-            "
-            >
-              <input
-                type="checkbox"
-                onChange={(e) => {
-                  dontShowAgain = e.target.checked;
-                }}
-                className="
-                  rounded-md border-border text-info
-                  focus:ring-2 focus:ring-info
-                "
-              />
-              <span className="text-foreground select-none">
-                Don&apos;t show this again
-              </span>
-            </label>
-            <Button
-              size="sm"
-              onClick={async () => {
-                if (dontShowAgain) {
-                  const { Store } = await import("@tauri-apps/plugin-store");
-                  const store = await Store.load("preferences.json");
-                  await store.set("show_recording_notification", false);
-                  await store.save();
-                }
-                toast.dismiss(toastId);
-              }}
-              className="w-full bg-foreground text-white hover:bg-foreground/90"
-            >
-              I&apos;ve Notified Participants
-            </Button>
-          </div>
-        ),
-        duration: 10000,
-        position: "bottom-right",
-      });
-    }
+    toast("Sta registrando", {
+      description: "Avvisa chi partecipa che la riunione è registrata.",
+      duration: 6000,
+      action: {
+        label: "Non dirmelo più",
+        onClick: async () => {
+          await store.set("show_recording_notification", false);
+          await store.save();
+        },
+      },
+    });
   } catch (notificationError) {
+    // l'avviso non deve mai fermare la registrazione
     console.error("Failed to show recording notification:", notificationError);
-    // Don't fail the recording if notification fails
   }
 }

@@ -7,8 +7,10 @@ import { NIENTE, type DueLivelli } from "@/hooks/useLivelliRegistrazione";
 import { minutiRestanti, type Momento } from "@/types/momento";
 import { durata } from "@/types/trascritta";
 import { orario } from "@/types/trascrizione";
+import { quando } from "@/lib/nome-riunione";
 
 import { SchedaFerma } from "./SchedaFerma";
+import { RigaProgetto } from "./RigaProgetto";
 import { StrisciaInUso } from "./StrisciaApparecchi";
 
 interface SchedaRiunioneProps {
@@ -23,6 +25,18 @@ interface SchedaRiunioneProps {
   onTrascrivi: (folder: string) => void;
   onButta: (folder: string) => void;
   onApri: (folder: string) => void;
+  /** la cartella della registrazione ferma ha cambiato nome (il progetto, 10-11) */
+  onRinominata?: (folder: string) => void;
+}
+
+/** Sotto la scheda mentre registra: gli apparecchi, poi il progetto. */
+function PiedeRegistra({ inUso, allarme = false }: { inUso: ApparecchiInUso | null; allarme?: boolean }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <StrisciaInUso inUso={inUso} allarme={allarme} />
+      <RigaProgetto allarme={allarme} />
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -57,7 +71,7 @@ function Scheda({
   return (
     <div
       className={`flex w-117.5 max-w-full flex-col rounded-2xl border ${
-        allarme ? "border-transparent bg-allarme-scheda" : "border-border bg-card"
+        allarme ? "border-transparent bg-allarme-scheda" : "scheda-viva border-border"
       }`}
     >
       <div className="flex items-center gap-6 px-7 py-6">
@@ -92,8 +106,8 @@ function Tondone({
       aria-label={testo}
       className={`flex size-27 flex-none items-center justify-center rounded-full text-sm font-bold tracking-wide transition-all duration-150 hover:scale-105 active:scale-95 ${
         vuoto
-          ? "border-2 border-ambra bg-transparent text-ambra hover:bg-ambra/10"
-          : "bg-ambra text-ambra-foreground hover:ring-8 hover:ring-ambra/15"
+          ? "tondo-vuoto border-2 border-ambra bg-transparent text-ambra hover:bg-ambra/10"
+          : "tondo-vivo bg-ambra text-ambra-foreground"
       }`}
     >
       {testo}
@@ -263,6 +277,7 @@ export function SchedaRiunione({
   onTrascrivi,
   onButta,
   onApri,
+  onRinominata,
 }: SchedaRiunioneProps) {
   switch (momento.tipo) {
     case "ferma":
@@ -281,7 +296,7 @@ export function SchedaRiunione({
           <Scheda
             figura={<Tondone testo="STOP" onClick={onStop} />}
             allarme
-            piede={<StrisciaInUso inUso={inUso} allarme />}
+            piede={<PiedeRegistra inUso={inUso} allarme />}
           >
             <div className="text-[34px] leading-[1.1] font-extrabold text-allarme-foreground">
               NON SENTO
@@ -300,7 +315,7 @@ export function SchedaRiunione({
       return (
         <Scheda
           figura={<Tondone testo="STOP" onClick={onStop} />}
-          piede={<StrisciaInUso inUso={inUso} />}
+          piede={<PiedeRegistra inUso={inUso} />}
         >
           <div className="text-[38px] leading-none font-light tabular-nums">{tempo}</div>
           <DueLivelliBarre livelli={livelli} />
@@ -312,10 +327,11 @@ export function SchedaRiunione({
       return (
         <Scheda
           figura={<Tondone testo="TRASCRIVI" vuoto onClick={() => onTrascrivi(momento.folder)} />}
+          piede={<RigaProgetto folder={momento.folder} onRinominata={onRinominata} />}
         >
           <div className="text-lg font-medium">Registrata · {durata(momento.minutes)}</div>
           <div className="truncate text-sm text-muted-foreground" title={momento.folder}>
-            {momento.folder}
+            {quando(momento.folder)}
           </div>
           <Butta folder={momento.folder} onButta={onButta} />
         </Scheda>

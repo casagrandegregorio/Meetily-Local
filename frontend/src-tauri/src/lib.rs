@@ -49,6 +49,8 @@ pub mod riunioni;
 pub mod ricomponi;
 // il nome della cartella: giorno e ora alla partenza, fine e durata allo Stop
 pub mod nome_riunione;
+// il progetto di una riunione: le cartelle di PROJECTS, il nome, la copia del testo (10-11)
+pub mod progetti;
 pub mod openai;
 pub mod openrouter;
 pub mod speaker_diarization;
@@ -940,6 +942,10 @@ pub fn run() {
             riunioni::trash_sheet,
             riunioni::trash_transcript,
             riunioni::list_known_voices,
+            progetti::elenca_progetti,
+            progetti::progetto_scelto,
+            progetti::imposta_progetto,
+            progetti::cambia_progetto_riunione,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,

@@ -10,6 +10,8 @@ import { X } from "lucide-react";
 import { finito, type Lavoro } from "@/contexts/LavoriContext";
 import { minutiFatti } from "@/types/avanzamento";
 import { minutiRestanti } from "@/types/momento";
+import { Quando } from "./Quando";
+import { RIGA_SOTTO } from "./RigaRegistrata";
 
 /** Percento fatto e minuti che mancano, stimati dal tempo passato. */
 export function stimaLavoro(lavoro: Lavoro): { percento: number; restano: number } {
@@ -92,19 +94,23 @@ export function RigaLavoro({ lavoro, onApri, onChiudi }: RigaLavoroProps) {
   const inCorso = !finito(lavoro);
   const tinta = tintaLavoro(lavoro);
   return (
-    <div className="flex w-117.5 items-center gap-2.5 px-1.5 text-xs text-muted-foreground">
-      <Anellino lavoro={lavoro} />
-      <span className={`${tinta} font-medium whitespace-nowrap`}>{paroleLavoro(lavoro)}</span>
-      <span className="min-w-0 truncate" title={lavoro.folder}>
-        {lavoro.folder}
+    <div className={RIGA_SOTTO}>
+      <span className="flex size-7.5 shrink-0 items-center justify-center">
+        <Anellino lavoro={lavoro} />
       </span>
+      <div className="flex min-w-0 flex-1 flex-col items-start">
+        <Quando folder={lavoro.folder} />
+        <span className={`${tinta} mt-0.5 max-w-full truncate text-[13px] font-medium`}>
+          {paroleLavoro(lavoro)}
+        </span>
+      </div>
       {s.fase === "fatto" && (
         <button
           type="button"
           onClick={() => onApri(lavoro.folder)}
-          className="rounded-full border border-success px-2.5 py-0.5 text-[11px] font-semibold text-success hover:bg-success hover:text-success-foreground"
+          className="shrink-0 rounded-full border border-success/70 px-4 py-1.5 text-[12.5px] font-semibold tracking-[0.12em] text-success transition-all duration-200 hover:bg-success hover:text-success-foreground"
         >
-          Apri
+          APRI
         </button>
       )}
       {!inCorso && (
@@ -112,9 +118,9 @@ export function RigaLavoro({ lavoro, onApri, onChiudi }: RigaLavoroProps) {
           type="button"
           onClick={() => onChiudi(lavoro.folder)}
           aria-label="Chiudi"
-          className="ml-auto rounded-sm p-0.5 hover:bg-muted hover:text-foreground"
+          className="shrink-0 rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <X className="size-3.5" />
+          <X className="size-4" />
         </button>
       )}
     </div>

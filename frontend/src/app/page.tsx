@@ -39,6 +39,7 @@ import { useLavori } from "@/contexts/LavoriContext";
 import { useLettore } from "@/contexts/LettoreContext";
 import { useSentinella } from "@/contexts/SentinellaContext";
 import { RigaLavoro } from "./_components/scheda/RigaLavoro";
+import { RigaRegistrata } from "./_components/scheda/RigaRegistrata";
 import { COMANDO_CESTINO } from "@/types/arretrata";
 
 export default function Home() {
@@ -75,7 +76,7 @@ export default function Home() {
   // Lo Stop nostro: ferma il backend e basta, la registrazione resta
   // «registrata». `useRecordingStop` di Meetily (trascrizione, database,
   // salto a meeting-details) resta nel repo, non usato.
-  const { registrata, ferma, scarta } = useFermaRegistrazione(setIsRecordingState);
+  const { registrata, ferma, scarta, rinomina } = useFermaRegistrazione(setIsRecordingState);
   // le trascrizioni in corso: la riga sottile sotto la scheda (galleria 12)
   const { lavori, avvia, chiudi, segnala } = useLavori();
   const { scarica } = useLettore();
@@ -241,11 +242,12 @@ export default function Home() {
   // «ferma» subito (galleria 12, numero 2): la trascrizione si segue nella
   // riga sottile sotto, non sulla scheda. I momenti trascrive / pronta /
   // muta della scheda restano per il finto (`/?momento=pronta`).
+  // Dal 10-11 dopo lo Stop la scheda torna subito «ferma», con REGISTRA:
+  // l'ultima riunione aspetta nella riga sotto (`RigaRegistrata`), da dove si
+  // trascrive. Il momento «registrata» della scheda resta per il finto.
   const momentoVero: Momento = isRecording
     ? { tipo: "registra", secondi: recordingState.recordingDuration, silenzio }
-    : registrata
-      ? { tipo: "registrata", ...registrata }
-      : { tipo: "ferma" };
+    : { tipo: "ferma" };
 
   // Nel finto, `/?momento=pronta` mostra un momento a scelta, con dati veri:
   // e' la galleria 5 dal vivo. Nell'app vera questa riga non fa niente.
@@ -274,7 +276,12 @@ export default function Home() {
   // «Butta» mette la cartella nel Cestino di Windows, dopo la conferma
   // sulla scheda.
   const trascrivi = (folder: string) => {
-    const minuti = momento.tipo === "registrata" ? momento.minutes : 0;
+    const minuti =
+      registrata?.folder === folder
+        ? registrata.minutes
+        : momento.tipo === "registrata"
+          ? momento.minutes
+          : 0;
     avvia(folder, minuti).catch((errore) =>
       toast.error("Non parte", { description: getErrorMessage(errore), duration: 12000 }),
     );
@@ -337,11 +344,30 @@ export default function Home() {
                 onTrascrivi={trascrivi}
                 onButta={butta}
                 onApri={apri}
+                onRinominata={rinomina}
               />
-              {/* le trascrizioni in corso, subito sotto la scheda (galleria 12) */}
-              {lavori.map((l) => (
-                <RigaLavoro key={l.folder} lavoro={l} onApri={apri} onChiudi={chiudi} />
-              ))}
+              {/* l'ultima riunione, che aspetta TRASCRIVI (10-11); mentre si
+                  registra la prossima si toglie di mezzo, e resta comunque
+                  in «Da trascrivere» */}
+              {((registrata && !isRecording) || lavori.length > 0) && (
+                // attaccate alla scheda: la scheda ferma ha gia' il suo margine
+                <div className="-mt-8 flex w-117.5 max-w-full flex-col gap-2 px-6 sm:px-0">
+                  {registrata && !isRecording && (
+                    <RigaRegistrata
+                      folder={registrata.folder}
+                      minutes={registrata.minutes}
+                      onTrascrivi={trascrivi}
+                      onButta={butta}
+                      onLascia={scarta}
+                      onRinominata={rinomina}
+                    />
+                  )}
+                  {/* le trascrizioni in corso, subito sotto la scheda (galleria 12) */}
+                  {lavori.map((l) => (
+                    <RigaLavoro key={l.folder} lavoro={l} onApri={apri} onChiudi={chiudi} />
+                  ))}
+                </div>
+              )}
             </div>
           </motion.div>
         </AnimatePresence>

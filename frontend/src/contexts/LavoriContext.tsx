@@ -24,6 +24,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
 
 import {
   COMANDO_AVANZAMENTO,
@@ -59,6 +60,8 @@ interface Lavori {
   versione: number;
   /** fa ricaricare gli elenchi: dopo il Cestino, per esempio */
   segnala: () => void;
+  /** la cartella ha cambiato nome (il progetto, 10-11): la riga del lavoro la segue */
+  rinomina: (vecchia: string, nuova: string) => void;
 }
 
 const Contesto = createContext<Lavori | null>(null);
@@ -115,6 +118,10 @@ export function LavoriProvider({ children }: { children: ReactNode }) {
 
   const segnala = useCallback(() => setVersione((v) => v + 1), []);
 
+  const rinomina = useCallback((vecchia: string, nuova: string) => {
+    setLavori((prima) => prima.map((l) => (l.folder === vecchia ? { ...l, folder: nuova } : l)));
+  }, []);
+
   // ogni due secondi, per i lavori ancora aperti
   useEffect(() => {
     const aperti = lavori.filter((l) => !finito(l));
@@ -131,7 +138,22 @@ export function LavoriProvider({ children }: { children: ReactNode }) {
     let stacca: (() => void) | undefined;
     void (async () => {
       try {
-        stacca = await listen<{ folder: string; ok: boolean }>(EVENTO_FINITA, (e) => {
+        stacca = await listen<{
+          folder: string;
+          ok: boolean;
+          /** dove il motore ha copiato il testo, se la riunione ha un progetto (10-11) */
+          copiato_in?: string | null;
+          /** perche' la copia non e' riuscita; il testo resta nella cartella delle registrazioni */
+          copia_errore?: string | null;
+        }>(EVENTO_FINITA, (e) => {
+          const { copiato_in, copia_errore } = e.payload;
+          if (copiato_in) toast.success(`Testo copiato in ${copiato_in}`, { duration: 7000 });
+          if (copia_errore) {
+            toast.error("Il testo è pronto, ma la copia nel progetto non è riuscita", {
+              description: `${copia_errore} Per riprovare, in «Trascritte» scegli «Nessuno» e poi di nuovo il progetto.`,
+              duration: 12000,
+            });
+          }
           void aggiorna(e.payload.folder).then(() => setVersione((v) => v + 1));
         });
       } catch (errore) {
@@ -142,8 +164,8 @@ export function LavoriProvider({ children }: { children: ReactNode }) {
   }, [aggiorna]);
 
   const valore = useMemo(
-    () => ({ lavori, avvia, chiudi, versione, segnala }),
-    [lavori, avvia, chiudi, versione, segnala],
+    () => ({ lavori, avvia, chiudi, versione, segnala, rinomina }),
+    [lavori, avvia, chiudi, versione, segnala, rinomina],
   );
   return <Contesto.Provider value={valore}>{children}</Contesto.Provider>;
 }

@@ -119,13 +119,13 @@ function RigaApparecchio({
   const riga = (
     <DropdownMenuTrigger
       disabled={disabilitato}
-      className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-ambra/40 disabled:opacity-60 ${
+      className={`riga-scelta flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-ambra/40 disabled:opacity-60 ${
         allarme ? "bg-black/25 hover:bg-black/35" : "bg-secondary hover:bg-muted"
       }`}
     >
       <Icona className={`size-3.5 shrink-0 ${inUso ? inUso.tinta : "text-muted-foreground"}`} />
       <span
-        className={`w-22 shrink-0 ${allarme ? "text-allarme-muted" : "text-muted-foreground"}`}
+        className={`w-26 shrink-0 ${allarme ? "text-allarme-muted" : "text-muted-foreground"}`}
       >
         {etichetta}
       </span>
@@ -148,12 +148,12 @@ function RigaApparecchio({
         </span>
       )}
       {manca ? (
-        <span className="shrink-0 text-[11px] font-medium text-red-400">non c&apos;è</span>
+        <span className="shrink-0 text-[12.5px] font-medium text-red-400">non c&apos;è</span>
       ) : cambiando ? (
-        <span className="shrink-0 text-[11px] text-muted-foreground">cambio…</span>
+        <span className="shrink-0 text-[12.5px] text-muted-foreground">cambio…</span>
       ) : (
         segue &&
-        !inUso?.avviso && <span className="shrink-0 text-[11px] text-ambra">predefinito</span>
+        !inUso?.avviso && <span className="shrink-0 text-[12.5px] text-ambra">predefinito</span>
       )}
       <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
     </DropdownMenuTrigger>
@@ -169,7 +169,7 @@ function RigaApparecchio({
           {nome}
         </TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="start" className="w-max max-w-[min(34rem,90vw)]">
+      <DropdownMenuContent align="start" className="menu-entra w-max max-w-[min(34rem,90vw)] border-white/10 bg-popover/95 shadow-2xl shadow-black/50 backdrop-blur-md">
         <DropdownMenuLabel className="text-[10.5px] font-normal tracking-wider text-muted-foreground uppercase">
           {etichetta}
           {inUso ? " · si cambia subito" : ""}

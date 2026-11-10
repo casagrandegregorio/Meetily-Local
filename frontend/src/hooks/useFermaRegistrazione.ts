@@ -80,5 +80,11 @@ export function useFermaRegistrazione(setIsRecording: (v: boolean) => void) {
   /** Toglie la scheda «registrata» (dopo TRASCRIVI o Butta). */
   const scarta = useCallback(() => setRegistrata(null), []);
 
-  return { registrata, ferma, scarta };
+  /** La cartella ha cambiato nome (il progetto scelto sulla scheda, 10-11). */
+  const rinomina = useCallback(
+    (folder: string) => setRegistrata((r) => (r ? { ...r, folder } : r)),
+    [],
+  );
+
+  return { registrata, ferma, scarta, rinomina };
 }
