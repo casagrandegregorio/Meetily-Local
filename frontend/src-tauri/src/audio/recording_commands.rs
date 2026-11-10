@@ -1163,6 +1163,74 @@ pub async fn get_active_audio_output() -> Result<super::playback_monitor::AudioO
         .map_err(|e| format!("Failed to get audio output info: {}", e))
 }
 
+/// Cambia il microfono o l'audio del PC a registrazione in corso (10-11),
+/// dai menu sotto la scheda.
+///
+/// `posto` e' "microfono" o "audio_pc"; `nome` e' quello dell'elenco, `None` =
+/// il predefinito di Windows. Si chiude solo lo stream di quel posto e se ne
+/// apre uno nuovo (`AudioStreamManager::sostituisci`): sul file resta un buco
+/// di circa un secondo su quel canale, l'altro continua. Se il nuovo non si
+/// apre torna quello di prima e la pagina riceve l'errore. Comunque vada, alla
+/// fine la scheda riceve i nomi aperti adesso (`apparecchi-in-uso`).
+///
+/// La scelta nel file delle preferenze la scrive la pagina, dopo il si' di
+/// questo comando: un apparecchio che non si apre non diventa la scelta.
+#[tauri::command]
+pub async fn cambia_apparecchio<R: Runtime>(
+    app: AppHandle<R>,
+    posto: String,
+    nome: Option<String>,
+) -> Result<(), String> {
+    use super::recording_state::DeviceType as TipoStream;
+
+    let (tipo_stream, tipo_elenco) = match posto.as_str() {
+        "microfono" => (TipoStream::Microphone, DeviceType::Input),
+        "audio_pc" => (TipoStream::System, DeviceType::Output),
+        _ => return Err(format!("Posto sconosciuto: {}", posto)),
+    };
+    if !IS_RECORDING.load(Ordering::SeqCst) {
+        return Err("Non sta registrando".to_string());
+    }
+    info!("🔁 Cambio {}: {:?} (None = predefinito di Windows)", posto, nome);
+
+    // lo stesso modo di cercare di `scegli_apparecchi`: per nome nudo e posto
+    let nuovo = match nome {
+        Some(nome) => super::devices::list_audio_devices()
+            .await
+            .map_err(|e| format!("Non riesco a leggere l'elenco degli apparecchi: {}", e))?
+            .into_iter()
+            .find(|d| d.device_type == tipo_elenco && d.name == nome)
+            .ok_or_else(|| format!("«{}» non c'e': scegline un altro", nome))?,
+        None => match tipo_elenco {
+            DeviceType::Input => default_input_device(),
+            DeviceType::Output => default_output_device(),
+        }
+        .map_err(|e| format!("Windows non ha un predefinito: {}", e))?,
+    };
+
+    // come `attempt_device_reconnect`: il manager sta dietro un Mutex di std,
+    // che non si puo' tenere attraverso un `.await` in un comando asincrono
+    let (esito, nomi) = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(async {
+            let mut manager_guard = RECORDING_MANAGER.lock().unwrap();
+            match manager_guard.as_mut() {
+                Some(manager) => {
+                    let esito = manager.cambia_apparecchio(tipo_stream, nuovo).await;
+                    (esito, Some(manager.apparecchi_aperti()))
+                }
+                None => (Err(anyhow::anyhow!("Non sta registrando")), None),
+            }
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?;
+
+    if let Some(nomi) = nomi {
+        super::apparecchi_in_uso::pubblica(&app, nomi);
+    }
+    esito.map_err(|e| format!("Non si apre: {}", e))
+}
+
 /// Manually trigger device reconnection attempt
 /// Useful for UI "Retry" button
 #[tauri::command]

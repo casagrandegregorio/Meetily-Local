@@ -558,6 +558,63 @@ impl AudioStreamManager {
             self.system_stream.as_ref().map(|s| s.nome_aperto().to_string()),
         )
     }
+
+    /// Cambia un apparecchio a registrazione in corso (10-11): chiude solo lo
+    /// stream di quel posto e ne apre uno nuovo, l'altro continua a
+    /// registrare. Il mescolatore va avanti anche con una sorgente sola
+    /// (`pipeline.rs`, «mic o system pronti»), quindi sul file resta solo un
+    /// buco di circa un secondo su quel canale.
+    ///
+    /// Se il nuovo non si apre si riapre quello di prima e si da' l'errore:
+    /// un cambio non deve mai costare la registrazione. Diverso da
+    /// `RecordingManager::attempt_device_reconnect`, che ferma e riapre tutti
+    /// e due gli stream.
+    pub async fn sostituisci(&mut self, tipo: DeviceType, nuovo: Arc<AudioDevice>) -> Result<()> {
+        let vecchio = match tipo {
+            DeviceType::Microphone => self.microphone_stream.take(),
+            DeviceType::System => self.system_stream.take(),
+        };
+        let apparecchio_vecchio = vecchio.as_ref().map(|s| s.device.clone());
+        if let Some(stream) = vecchio {
+            info!("🔁 Cambio {:?}: chiudo '{}'", tipo, stream.nome_aperto());
+            if let Err(e) = stream.stop() {
+                warn!("Lo stream vecchio non si e' chiuso bene: {}", e);
+            }
+        }
+
+        match AudioStream::create(nuovo.clone(), self.state.clone(), tipo).await {
+            Ok(stream) => {
+                info!("🔁 Cambio {:?}: aperto '{}'", tipo, stream.nome_aperto());
+                match tipo {
+                    DeviceType::Microphone => {
+                        self.state.set_microphone_device(nuovo);
+                        self.microphone_stream = Some(stream);
+                    }
+                    DeviceType::System => {
+                        self.state.set_system_device(nuovo);
+                        self.system_stream = Some(stream);
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => {
+                error!("❌ Cambio {:?}: '{}' non si apre: {}", tipo, nuovo.name, e);
+                if let Some(apparecchio) = apparecchio_vecchio {
+                    match AudioStream::create(apparecchio, self.state.clone(), tipo).await {
+                        Ok(stream) => {
+                            info!("↩️ Riaperto quello di prima: '{}'", stream.nome_aperto());
+                            match tipo {
+                                DeviceType::Microphone => self.microphone_stream = Some(stream),
+                                DeviceType::System => self.system_stream = Some(stream),
+                            }
+                        }
+                        Err(e2) => error!("❌ Nemmeno quello di prima si riapre: {}", e2),
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
 }
 
 impl Drop for AudioStreamManager {

@@ -160,6 +160,20 @@ impl RecordingManager {
         self.stream_manager.nomi_aperti()
     }
 
+    /// Cambia il microfono o l'audio del PC mentre registra (10-11), senza
+    /// fermare l'altro (`AudioStreamManager::sostituisci`). Dopo il cambio la
+    /// metadata della riunione dice gli apparecchi aperti adesso.
+    pub async fn cambia_apparecchio(
+        &mut self,
+        tipo: RecordingDeviceType,
+        nuovo: AudioDevice,
+    ) -> Result<()> {
+        let esito = self.stream_manager.sostituisci(tipo, Arc::new(nuovo)).await;
+        let (microfono, audio_pc) = self.stream_manager.nomi_aperti();
+        self.recording_saver.set_device_info(microfono, audio_pc);
+        esito
+    }
+
     /// Start recording with default devices and auto_save setting
     ///
     /// # Arguments

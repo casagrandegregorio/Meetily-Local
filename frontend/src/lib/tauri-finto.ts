@@ -83,6 +83,29 @@ function cartellaFintaDiAdesso(): string {
   return `Meeting ${locale}_${ora}_${locale}_${utc}`;
 }
 
+/** Gli apparecchi dopo un cambio a registrazione in corso; `null` = nessun cambio. */
+let inUsoFinto: { microfono: string | null; audio_pc: string | null } | null = null;
+
+/**
+ * Il cambio di un apparecchio mentre registra (`cambia_apparecchio`): un
+ * secondo, come il motore che chiude e riapre, poi i nomi nuovi alla scheda.
+ * Le casse Realtek non si aprono apposta, per vedere l'avviso quando il cambio
+ * non riesce: la registrazione resta con quello di prima.
+ */
+async function cambiaApparecchioFinto({ posto, nome }: { posto?: string; nome?: string | null }) {
+  await new Promise((fatto) => setTimeout(fatto, 1000));
+  if (nome === "Speakers (Realtek Audio)")
+    throw "Non si apre: Device not found or no compatible configuration available: Speakers (Realtek Audio)";
+  const [micDefault, pcDefault] = risposteFinte.get_default_audio_devices as [string, string];
+  const prima = apparecchiInUsoFinti() ?? { microfono: micDefault, audio_pc: pcDefault };
+  inUsoFinto =
+    posto === "microfono"
+      ? { ...prima, microfono: nome ?? micDefault }
+      : { ...prima, audio_pc: nome ?? pcDefault };
+  emettiFinto("apparecchi-in-uso", inUsoFinto);
+  return null;
+}
+
 /** Il momento chiesto con `?momento=`, per le varianti del finto. */
 const momentoNellIndirizzo = () =>
   typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("momento");
@@ -96,6 +119,7 @@ const momentoNellIndirizzo = () =>
 function apparecchiInUsoFinti() {
   const chiesto = momentoNellIndirizzo();
   if (registrazioneFinta === null && !chiesto?.startsWith("registra")) return null;
+  if (inUsoFinto) return inUsoFinto;
   const [micDefault, pcDefault] = risposteFinte.get_default_audio_devices as [string, string];
   return {
     microfono: (preferenzeFinte.preferred_mic_device as string | null) ?? micDefault,
@@ -108,6 +132,7 @@ function apparecchiInUsoFinti() {
 
 function avviaRegistrazioneFinta() {
   registrazioneFinta = { dal: Date.now(), folder: cartellaFintaDiAdesso() };
+  inUsoFinto = null;
   // il backend vero lo manda dopo un attimo, non dentro la chiamata; i nomi
   // degli apparecchi aperti prima della partenza, come il motore
   setTimeout(() => {
@@ -120,6 +145,7 @@ function avviaRegistrazioneFinta() {
 function fermaRegistrazioneFinta() {
   const folder = registrazioneFinta?.folder;
   registrazioneFinta = null;
+  inUsoFinto = null;
   setTimeout(
     () =>
       emettiFinto("recording-stopped", {
@@ -268,6 +294,7 @@ const risposteFinte: Record<string, unknown> = {
   get_default_audio_devices: ["Microphone Array (Intel® Smart Sound Technology for Digital Microphones)", "Headphones (Bose QC)"],
   // gli apparecchi che la registrazione ha aperto davvero (dal 10-11)
   apparecchi_in_uso: () => apparecchiInUsoFinti(),
+  cambia_apparecchio: cambiaApparecchioFinto,
   // il file delle preferenze, tenuto in memoria: la scelta fatta sulla
   // scheda si rivede nelle Impostazioni, e viceversa (18-09)
   get_recording_preferences: () => ({ ...preferenzeFinte }),

@@ -845,8 +845,10 @@ pub fn run() {
             whisper_engine::parallel_commands::test_parallel_processing_setup,
             get_audio_devices,
             get_default_audio_devices,
-            // i nomi degli apparecchi aperti, per la scheda mentre registra (10-11)
+            // i nomi degli apparecchi aperti, per la scheda mentre registra, e
+            // il cambio di un apparecchio a registrazione in corso (10-11)
             audio::apparecchi_in_uso::apparecchi_in_uso,
+            audio::recording_commands::cambia_apparecchio,
             trigger_microphone_permission,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
