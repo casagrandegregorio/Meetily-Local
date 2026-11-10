@@ -25,6 +25,8 @@ pub mod hardware_detector;
 pub mod incremental_saver; // NEW: Incremental audio saving with checkpoints
 pub mod level_monitor;
 pub mod misura_livelli;
+// il microfono spento mentre registra, e la guardia che avvisa se si parla (10-11)
+pub mod muto;
 pub mod pipeline;
 pub mod playback_monitor;
 pub mod post_processor;

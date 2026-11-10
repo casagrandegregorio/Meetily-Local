@@ -60,12 +60,18 @@ function emettiFinto(event: string, payload: unknown) {
  */
 function avviaLivelliFinti() {
   let passo = 0;
+  // il microfono spento (10-11): dopo quattro secondi «sente» parlare e lo
+  // dice, come il motore; poi tace per trenta secondi
+  let passiMuto = 0;
   setInterval(() => {
     const ascoltato = [...ascoltatoriFinti.values()].some(
       (a) => a.event === "livelli-registrazione",
     );
     if (!ascoltato) return;
     passo += 1;
+    passiMuto = mutoFinto ? passiMuto + 1 : 0;
+    if (passiMuto === 40) emettiFinto("parli-da-muto", {});
+    if (passiMuto >= 340) passiMuto = 0;
     const onda = (periodo: number, ampiezza: number) =>
       ampiezza * (0.5 + 0.5 * Math.sin((passo / periodo) * Math.PI * 2)) * (0.6 + Math.random() * 0.4);
     emettiFinto("livelli-registrazione", {
@@ -230,7 +236,10 @@ function apparecchiInUsoFinti() {
   };
 }
 
+let mutoFinto = false;
+
 function avviaRegistrazioneFinta() {
+  mutoFinto = false;
   registrazioneFinta = { dal: Date.now(), folder: cartellaFintaDiAdesso() };
   inUsoFinto = null;
   // il backend vero lo manda dopo un attimo, non dentro la chiamata; i nomi
@@ -243,6 +252,7 @@ function avviaRegistrazioneFinta() {
 }
 
 function fermaRegistrazioneFinta() {
+  mutoFinto = false;
   const folder = registrazioneFinta
     ? cartellaFintaAlloStop(registrazioneFinta.folder, registrazioneFinta.dal, progettoFinto)
     : undefined;
@@ -430,6 +440,12 @@ const risposteFinte: Record<string, unknown> = {
     return null;
   },
   cambia_progetto_riunione: cambiaProgettoRiunioneFinto,
+  // il microfono spento mentre registra (dal 10-11)
+  microfono_muto: () => mutoFinto,
+  imposta_muto: ({ muto }: { muto: boolean }) => {
+    mutoFinto = muto === true;
+    return null;
+  },
   // il file delle preferenze, tenuto in memoria: la scelta fatta sulla
   // scheda si rivede nelle Impostazioni, e viceversa (18-09)
   get_recording_preferences: () => ({ ...preferenzeFinte }),

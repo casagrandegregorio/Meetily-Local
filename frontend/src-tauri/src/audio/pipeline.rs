@@ -925,15 +925,26 @@ impl AudioPipeline {
                     // VAD, plus a mixed slice used only for the recording WAV.
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // STEP 3: Source-tagged VAD on each stream independently
-                            self.run_vad_for_source(&mic_window, DeviceType::Microphone);
-                            self.run_vad_for_source(&sys_window, DeviceType::System);
-
                             // Le barrette della scheda: qui le due sorgenti
                             // sono ancora separate, dopo il mescolatore no.
+                            // Si misura il microfono vero anche quando e'
+                            // spento: e' cosi' che ci si accorge che Greg
+                            // sta parlando a microfono spento (10-11).
                             if let Some(misura) = self.misura_livelli.as_mut() {
                                 misura.ascolta(&mic_window, &sys_window);
                             }
+
+                            // Il microfono spento (10-11): da qui in poi
+                            // e' silenzio, ne' nel testo dal vivo ne' nel file.
+                            let mic_window = if super::muto::e_muto() {
+                                vec![0.0; mic_window.len()]
+                            } else {
+                                mic_window
+                            };
+
+                            // STEP 3: Source-tagged VAD on each stream independently
+                            self.run_vad_for_source(&mic_window, DeviceType::Microphone);
+                            self.run_vad_for_source(&sys_window, DeviceType::System);
 
                             // STEP 4: Mix for the recording WAV (unchanged behavior)
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);

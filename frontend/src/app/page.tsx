@@ -33,6 +33,7 @@ import { SettingsModals } from "./_components/SettingsModal";
 import { SchedaRiunione } from "./_components/scheda/SchedaRiunione";
 import { useLivelliRegistrazione } from "@/hooks/useLivelliRegistrazione";
 import { useApparecchiInUso } from "@/hooks/useApparecchiInUso";
+import { useMicrofonoMuto } from "@/hooks/useMicrofonoMuto";
 import { useMomentoFinto } from "@/lib/momenti-finti";
 import type { Momento } from "@/types/momento";
 import { useLavori } from "@/contexts/LavoriContext";
@@ -267,6 +268,9 @@ export default function Home() {
   // scelta non arrivava al motore e la riunione e' uscita muta.
   const inUso = useApparecchiInUso(momento.tipo === "registra");
 
+  // il microfono spento mentre registra, e l avviso se si parla (10-11)
+  const { muto, alterna: alternaMuto } = useMicrofonoMuto(isRecording);
+
   // la schermata in allarme: solo mentre registra, e solo se la sentinella
   // dice che non sta entrando niente
   const inAllarme = momento.tipo === "registra" && momento.silenzio != null;
@@ -345,6 +349,8 @@ export default function Home() {
                 onButta={butta}
                 onApri={apri}
                 onRinominata={rinomina}
+                muto={muto}
+                onMuto={alternaMuto}
               />
               {/* l'ultima riunione, che aspetta TRASCRIVI (10-11); mentre si
                   registra la prossima si toglie di mezzo, e resta comunque

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { Mic, MicOff } from "lucide-react";
 
 import type { ApparecchiInUso } from "@/hooks/useApparecchiInUso";
 import { NIENTE, type DueLivelli } from "@/hooks/useLivelliRegistrazione";
@@ -27,6 +28,39 @@ interface SchedaRiunioneProps {
   onApri: (folder: string) => void;
   /** la cartella della registrazione ferma ha cambiato nome (il progetto, 10-11) */
   onRinominata?: (folder: string) => void;
+  /** il microfono spento mentre registra (10-11) */
+  muto?: boolean;
+  onMuto?: () => void;
+}
+
+/**
+ * Il tasto del microfono, accanto al tempo (10-11): spento, il microfono non
+ * va nella registrazione ma il motore lo ascolta ancora, e avvisa se sente
+ * parlare. Rosso pieno quando e' spento: si deve vedere da lontano.
+ */
+function TastoMuto({ muto, onMuto, allarme = false }: { muto: boolean; onMuto?: () => void; allarme?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onMuto}
+      aria-pressed={muto}
+      aria-label={muto ? "Riaccendi il microfono" : "Spegni il microfono"}
+      title={
+        muto
+          ? "Microfono spento: registro solo l'audio del PC. Clic per riaccenderlo."
+          : "Spegni il microfono (gente che parla intorno): registro solo l'audio del PC."
+      }
+      className={`flex size-10 shrink-0 items-center justify-center rounded-full border transition-all duration-200 ${
+        muto
+          ? "border-red-500 bg-red-500/90 text-white shadow-[0_0_22px_-4px_rgb(239_68_68/0.8)] hover:bg-red-500"
+          : allarme
+            ? "border-white/30 text-allarme-foreground hover:bg-white/10"
+            : "border-border text-muted-foreground hover:border-ambra/70 hover:text-ambra hover:shadow-[0_0_16px_-4px_hsl(var(--ambra)/0.6)]"
+      }`}
+    >
+      {muto ? <MicOff className="size-4.5" /> : <Mic className="size-4.5" />}
+    </button>
+  );
 }
 
 /** Sotto la scheda mentre registra: gli apparecchi, poi il progetto. */
@@ -237,21 +271,28 @@ function Fila({
  * dall'audio del PC — stesse entrando davvero. I nomi stanno scritti sotto per
  * esteso: la fila si deve poter leggere senza sapere cosa vuol dire un colore.
  */
-function DueLivelliBarre({ livelli }: { livelli: DueLivelli }) {
+function DueLivelliBarre({ livelli, muto = false }: { livelli: DueLivelli; muto?: boolean }) {
   return (
     <div className="flex flex-col gap-1.5">
       {/* w-fit: la linea di mezzo e' larga quanto le barrette, non quanto la
           scheda — e' il pavimento da cui le due file crescono */}
       <div className="flex w-fit flex-col">
-        <Fila valori={livelli.microfono} colore="bg-ambra" verso="su" />
+        <Fila valori={livelli.microfono} colore={muto ? "bg-muted-foreground/35" : "bg-ambra"} verso="su" />
         <div className="my-0.75 h-px bg-border" />
         <Fila valori={livelli.audioPc} colore="bg-audiopc" verso="giu" />
       </div>
       <div className="flex gap-3.5 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <i className="block size-2 rounded-xs bg-ambra" aria-hidden />
-          microfono
-        </span>
+        {muto ? (
+          <span className="flex items-center gap-1.5 font-medium text-red-400">
+            <MicOff className="size-3" aria-hidden />
+            microfono spento
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <i className="block size-2 rounded-xs bg-ambra" aria-hidden />
+            microfono
+          </span>
+        )}
         <span className="flex items-center gap-1.5">
           <i className="block size-2 rounded-xs bg-audiopc" aria-hidden />
           audio del PC
@@ -278,6 +319,8 @@ export function SchedaRiunione({
   onButta,
   onApri,
   onRinominata,
+  muto = false,
+  onMuto,
 }: SchedaRiunioneProps) {
   switch (momento.tipo) {
     case "ferma":
@@ -307,8 +350,11 @@ export function SchedaRiunione({
               Da {durata(Math.floor(momento.silenzio / 60))}. Controlla il microfono e l&apos;audio
               del PC.
             </div>
-            <div className="text-[22px] leading-none font-light tabular-nums text-allarme-foreground">
-              {tempo}
+            <div className="flex items-center gap-3">
+              <div className="text-[22px] leading-none font-light tabular-nums text-allarme-foreground">
+                {tempo}
+              </div>
+              <TastoMuto muto={muto} onMuto={onMuto} allarme />
             </div>
           </Scheda>
         );
@@ -317,8 +363,11 @@ export function SchedaRiunione({
           figura={<Tondone testo="STOP" onClick={onStop} />}
           piede={<PiedeRegistra inUso={inUso} />}
         >
-          <div className="text-[38px] leading-none font-light tabular-nums">{tempo}</div>
-          <DueLivelliBarre livelli={livelli} />
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[38px] leading-none font-light tabular-nums">{tempo}</div>
+            <TastoMuto muto={muto} onMuto={onMuto} />
+          </div>
+          <DueLivelliBarre livelli={livelli} muto={muto} />
         </Scheda>
       );
     }

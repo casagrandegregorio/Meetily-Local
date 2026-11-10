@@ -946,6 +946,8 @@ pub fn run() {
             progetti::progetto_scelto,
             progetti::imposta_progetto,
             progetti::cambia_progetto_riunione,
+            audio::muto::imposta_muto,
+            audio::muto::microfono_muto,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,

@@ -188,13 +188,37 @@ fn sentinella_per<R: Runtime>(app: &AppHandle<R>) -> SentinellaSilenzio {
 /// quanto forte entra l'audio del PC (RMS, 0-1), misurati dove le due sorgenti
 /// sono ancora separate. Prima del 24-09 la scheda mostrava una fila sola, che
 /// era il microfono: dall'audio del PC non si vedeva niente.
+///
+/// Dal 10-11 qui c'e' anche la guardia del microfono spento (`muto.rs`): se a
+/// microfono spento si sente parlare, la pagina riceve `parli-da-muto` (e
+/// mostra «Riaccendi») e arriva una notifica di Windows, come per la
+/// sentinella del silenzio.
 fn misura_per<R: Runtime>(app: &AppHandle<R>) -> MisuraLivelli {
+    use tauri_plugin_notification::NotificationExt;
     let per_livelli = app.clone();
+    let guardia = std::sync::Mutex::new(super::muto::GuardiaMuto::default());
     MisuraLivelli::new(move |microfono, audio_pc| {
         let _ = per_livelli.emit(
             "livelli-registrazione",
             serde_json::json!({ "microfono": microfono, "audio_pc": audio_pc }),
         );
+        let avvisa = guardia
+            .lock()
+            .map(|mut g| g.ascolta(super::muto::e_muto(), microfono))
+            .unwrap_or(false);
+        if avvisa {
+            info!("🎙️ Si parla a microfono spento");
+            let _ = per_livelli.emit("parli-da-muto", serde_json::json!({}));
+            if let Err(e) = per_livelli
+                .notification()
+                .builder()
+                .title("Stai parlando? Il microfono è spento")
+                .body("Quello che dici adesso non va nella registrazione. Riaccendilo dalla scheda di Meetily.")
+                .show()
+            {
+                warn!("Notifica di Windows non mostrata: {}", e);
+            }
+        }
     })
 }
 
@@ -346,6 +370,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
     manager.set_sentinella_silenzio(sentinella_per(&app));
     manager.set_misura_livelli(misura_per(&app));
+    super::muto::azzera();
     // la cartella delle Impostazioni, la stessa che leggono gli elenchi (25-09)
     match super::recording_preferences::load_recording_preferences(&app).await {
         Ok(prefs) => manager.set_cartella_registrazioni(prefs.save_folder),
@@ -477,6 +502,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
     manager.set_sentinella_silenzio(sentinella_per(&app));
     manager.set_misura_livelli(misura_per(&app));
+    super::muto::azzera();
     // la cartella delle Impostazioni, la stessa che leggono gli elenchi (25-09)
     match super::recording_preferences::load_recording_preferences(&app).await {
         Ok(prefs) => manager.set_cartella_registrazioni(prefs.save_folder),
@@ -846,6 +872,7 @@ pub async fn stop_recording<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
     super::apparecchi_in_uso::azzera();
+    super::muto::azzera();
     // la scelta del progetto vale per una registrazione sola (10-11)
     let _ = crate::progetti::prendi_scelto();
 
