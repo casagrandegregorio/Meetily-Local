@@ -770,13 +770,22 @@ jobs:
           # script log holds the exact compiler flags ggml was built with.
           # Fail loudly here rather than shipping an installer that dies with
           # STATUS_ILLEGAL_INSTRUCTION on any CPU without AVX-512.
-          # Si guarda solo in target\ (le due build di cargo scrivono li'): la
-          # ricerca su tutta la cartella, node_modules di pnpm compreso, il
-          # 20-11 e' tornata vuota anche con l'app compilata.
-          $logs = Get-ChildItem -Path target -Recurse -Filter output -ErrorAction SilentlyContinue |
-                  Where-Object { $_.FullName -match 'whisper-rs-sys|llama-cpp-sys-2' }
+          # 20-11: con Rust 1.100 il file «output» non si trovava piu' (tre build
+          # rosse con l'app compilata). Il registro si cerca per contenuto, con
+          # qualunque nome, in target\ e nelle cartelle dove cargo puo' tenere i
+          # file intermedi; se non c'e', si stampa cosa c'e' in quelle cartelle.
+          $radici = @('target', $env:CARGO_HOME, (Join-Path $env:USERPROFILE '.cargo'), $env:LOCALAPPDATA) |
+                    Where-Object { $_ -and (Test-Path $_) }
+          $candidati = foreach ($r in $radici) {
+            Get-ChildItem -Path $r -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match 'whisper-rs-sys|llama-cpp-sys-2' -and $_.Length -lt 20MB -and
+                             $_.Extension -notin '.lib', '.obj', '.dll', '.exe', '.pdb', '.rlib', '.rmeta', '.a', '.o', '.c', '.cpp', '.h', '.hpp', '.cu', '.metal' }
+          }
+          $logs = $candidati | Where-Object { Select-String -Path $_.FullName -Pattern 'Adding CPU backend variant' -Quiet }
 
           if (-not $logs) {
+            Write-Host "Cercato in: $($radici -join ', ')"
+            $candidati | Select-Object -First 40 | ForEach-Object { Write-Host "  $($_.FullName)" }
             Write-Error "No build-script logs found for whisper-rs-sys / llama-cpp-sys-2 - the check cannot verify anything, so it fails on purpose."
             exit 1
           }
