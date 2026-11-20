@@ -764,7 +764,10 @@ jobs:
           # script log holds the exact compiler flags ggml was built with.
           # Fail loudly here rather than shipping an installer that dies with
           # STATUS_ILLEGAL_INSTRUCTION on any CPU without AVX-512.
-          $logs = Get-ChildItem -Path . -Recurse -Filter output -ErrorAction SilentlyContinue |
+          # Si guarda solo in target\ (le due build di cargo scrivono li'): la
+          # ricerca su tutta la cartella, node_modules di pnpm compreso, il
+          # 20-11 e' tornata vuota anche con l'app compilata.
+          $logs = Get-ChildItem -Path target -Recurse -Filter output -ErrorAction SilentlyContinue |
                   Where-Object { $_.FullName -match 'whisper-rs-sys|llama-cpp-sys-2' }
 
           if (-not $logs) {
