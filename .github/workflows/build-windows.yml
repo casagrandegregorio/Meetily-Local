@@ -793,13 +793,16 @@ jobs:
           $bad = @()
           $good = @()
           foreach ($log in $logs) {
-            $text = Get-Content $log.FullName -Raw
+            # solo le righe scritte dalla compilazione: i sorgenti di ggml
+            # (CMakeLists.txt) hanno la stessa frase con ${ARCH_FLAGS} e
+            # nominano AVX512 come testo (20-11)
+            $righe = Select-String -Path $log.FullName -Pattern 'Adding CPU backend variant[^\r\n]*' |
+                     ForEach-Object { $_.Matches[0].Value } | Where-Object { $_ -notmatch '\$\{' }
+            if (-not $righe) { continue }
             $crate = Split-Path (Split-Path $log.FullName -Parent) -Leaf
-            if ($text -match '/arch:AVX512') { $bad += $crate }
-            if ($text -match '/arch:AVX2')   { $good += $crate }
-            $variant = [regex]::Matches($text, 'Adding CPU backend variant[^\r\n]*') |
-                       ForEach-Object { $_.Value } | Select-Object -First 1
-            Write-Host "$crate :: $variant"
+            if ($righe -match '/arch:AVX512') { $bad += $crate }
+            if ($righe -match '/arch:AVX2')   { $good += $crate }
+            Write-Host "$($log.FullName) :: $($righe | Select-Object -First 1)"
           }
 
           if ($bad.Count -gt 0) {
