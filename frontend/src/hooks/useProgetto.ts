@@ -37,6 +37,8 @@ import { getErrorMessage } from "@/lib/utils";
 export { progettoDellaCartella };
 
 export const COMANDO_ELENCA_PROGETTI = "elenca_progetti";
+/** il nome della cartella dei progetti sul Desktop: `PROJECTS` al PC FBK, `FBK` a casa (20-11) */
+export const COMANDO_CARTELLA_PROGETTI = "cartella_progetti";
 export const COMANDO_PROGETTO_SCELTO = "progetto_scelto";
 export const COMANDO_IMPOSTA_PROGETTO = "imposta_progetto";
 /** cambia il progetto di una registrazione gia' ferma: rinomina e sposta la copia */
@@ -68,11 +70,18 @@ export interface EsitoProgetto {
   };
 }
 
+// Il nome della cartella dei progetti di questo PC, chiesto al motore insieme
+// all'elenco: fino alla prima risposta vale `PROJECTS`.
+let radice = "PROJECTS";
+export function cartellaProgetti(): string {
+  return radice;
+}
+
 /** Dove arrivera' il testo, scritto come lo si legge in Esplora file. */
 export function destinazione(nome: string, progetti: Progetto[]): string {
   const p = progetti.find((x) => x.nome === nome);
-  if (!p) return `PROJECTS\\${CARTELLA_SENZA_PROGETTO}\\${nome}`;
-  return `PROJECTS\\${p.nome}\\${p.cartella_riunioni ?? "riunioni"}`;
+  if (!p) return `${radice}\\${CARTELLA_SENZA_PROGETTO}\\${nome}`;
+  return `${radice}\\${p.nome}\\${p.cartella_riunioni ?? "riunioni"}`;
 }
 
 // Un elenco solo per tutta la pagina: «Trascritte» ha una riga per riunione,
@@ -82,7 +91,15 @@ export function destinazione(nome: string, progetti: Progetto[]): string {
 let ultimo: { quando: number; elenco: Promise<Progetto[]> } | null = null;
 function elencoProgetti(): Promise<Progetto[]> {
   if (ultimo && Date.now() - ultimo.quando < 2000) return ultimo.elenco;
-  const elenco = invoke<Progetto[]>(COMANDO_ELENCA_PROGETTI).then((e) => (Array.isArray(e) ? e : []));
+  const nomeRadice = invoke<string>(COMANDO_CARTELLA_PROGETTI)
+    .then((n) => {
+      if (typeof n === "string" && n) radice = n;
+    })
+    .catch(() => undefined);
+  const elenco = Promise.all([
+    invoke<Progetto[]>(COMANDO_ELENCA_PROGETTI),
+    nomeRadice,
+  ]).then(([e]) => (Array.isArray(e) ? e : []));
   ultimo = { quando: Date.now(), elenco };
   elenco.catch(() => (ultimo = null));
   return elenco;

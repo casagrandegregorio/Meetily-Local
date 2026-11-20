@@ -434,6 +434,7 @@ const risposteFinte: Record<string, unknown> = {
   cambia_apparecchio: cambiaApparecchioFinto,
   // il progetto della riunione (dal 10-11)
   elenca_progetti: () => PROGETTI_FINTI.map((p) => ({ ...p })),
+  cartella_progetti: "PROJECTS",
   progetto_scelto: () => progettoFinto,
   imposta_progetto: ({ nome }: { nome?: string | null }) => {
     progettoFinto = nome ?? null;

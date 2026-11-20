@@ -11,7 +11,7 @@
 //   «Trascritte»: lo stesso menu, e su una riunione gia' trascritta il
 //   testo si sposta (vedi `useCambiaProgetto`).
 //
-// Il menu: «Nessuno», le cartelle di `Desktop\PROJECTS`, «Scrivi un nome…».
+// Il menu: «Nessuno», le cartelle di `Desktop\PROJECTS` (a casa `Desktop\FBK`), «Scrivi un nome…».
 // Un nome scritto a mano che non e' fra le cartelle porta il segno «nuovo», e
 // il suo testo andra' in `_RIUNIONI_SENZA_PROGETTO\<nome>`.
 import { useState, type ReactNode } from "react";
@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  cartellaProgetti,
   destinazione,
   progettoDellaCartella,
   useCambiaProgetto,
@@ -110,7 +111,7 @@ function SceltaProgetto({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="menu-entra max-h-80 w-max max-w-[min(34rem,90vw)] overflow-y-auto border-white/10 bg-popover/95 shadow-2xl shadow-black/50 backdrop-blur-md">
             <DropdownMenuLabel className="text-[10.5px] font-normal tracking-wider text-muted-foreground uppercase">
-              Progetto · le cartelle di PROJECTS
+              Progetto · le cartelle di {cartellaProgetti()}
             </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => scegli(null)} className="gap-2">
               <Check className={`size-3 text-ambra ${attuale == null ? "" : "invisible"}`} />

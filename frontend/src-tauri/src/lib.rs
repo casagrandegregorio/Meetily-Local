@@ -943,6 +943,7 @@ pub fn run() {
             riunioni::trash_transcript,
             riunioni::list_known_voices,
             progetti::elenca_progetti,
+            progetti::cartella_progetti,
             progetti::progetto_scelto,
             progetti::imposta_progetto,
             progetti::cambia_progetto_riunione,

@@ -1,7 +1,9 @@
 //! Il progetto di una riunione (10-11).
 //!
-//! I progetti sono le cartelle di `Desktop\PROJECTS` (quelle che cominciano
-//! con `_` o `.` sono raccolte, non progetti). Il progetto si sceglie prima o
+//! I progetti sono le cartelle di `Desktop\PROJECTS` sul PC FBK, e della sua
+//! gemella `Desktop\FBK` sul PC di casa (20-11: e' la stessa cartella, che a
+//! casa si chiama cosi'; vale la prima delle due che c'e', `radice`). Quelle
+//! che cominciano con `_` o `.` sono raccolte, non progetti. Il progetto si sceglie prima o
 //! durante la registrazione (`imposta_progetto`), e allo Stop va in coda al
 //! nome della cartella: `… · 0h43 · PROGETTO-GAMMA` (`nome_riunione.rs`). Poi la
 //! scelta torna «nessuno».
@@ -10,7 +12,7 @@
 //! progetto, col nome della riunione (`<cartella>.md`): quella che il progetto
 //! ha gia' (`meeting`, `meetings`, `riunioni`…, cercata fino a tre livelli),
 //! se no `<progetto>\riunioni`; per un nome che non e' fra i progetti,
-//! `PROJECTS\_RIUNIONI_SENZA_PROGETTO\<nome>`. L'audio e l'originale restano
+//! `<cartella dei progetti>\_RIUNIONI_SENZA_PROGETTO\<nome>`. L'audio e l'originale restano
 //! in `meetily-recordings`: ogni scelta si puo' rifare.
 //!
 //! Cambiare progetto dopo (`cambia_progetto_riunione`) rinomina la cartella
@@ -32,7 +34,8 @@ use tauri::{AppHandle, Runtime};
 use crate::nome_riunione::{leggi, posto_libero, progetto_di};
 use crate::riunioni::{cartella_registrazioni, nome_sicuro, si_trascrive, InCorso, TESTO};
 
-const PROGETTI: &str = "PROJECTS";
+/// la cartella dei progetti sul Desktop: `PROJECTS` al PC FBK, `FBK` a casa
+const PROGETTI: [&str; 2] = ["PROJECTS", "FBK"];
 pub const SENZA_PROGETTO: &str = "_RIUNIONI_SENZA_PROGETTO";
 const RIUNIONI: &str = "riunioni";
 /// le parole che dicono «qui dentro ci sono le riunioni»
@@ -70,9 +73,23 @@ pub struct EsitoProgetto {
     pub testo: Option<Testo>,
 }
 
+/// La cartella dei progetti di questo PC: la prima di `PROGETTI` che c'e' sul
+/// Desktop; se non c'e' nessuna delle due, `PROJECTS` (come prima del 20-11).
 fn radice() -> Result<PathBuf, String> {
     let desktop = dirs::desktop_dir().ok_or_else(|| "Non trovo il Desktop.".to_string())?;
-    Ok(desktop.join(PROGETTI))
+    let trovata = PROGETTI.iter().map(|n| desktop.join(n)).find(|p| p.is_dir());
+    Ok(trovata.unwrap_or_else(|| desktop.join(PROGETTI[0])))
+}
+
+/// Il nome della cartella dei progetti di questo PC (`PROJECTS` o `FBK`), per
+/// le scritte dell'interfaccia.
+#[tauri::command]
+pub async fn cartella_progetti() -> Result<String, String> {
+    let radice = radice()?;
+    Ok(radice
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| PROGETTI[0].to_string()))
 }
 
 /// Il nome pulito come lo vuole Windows; vuoto = nessun progetto.
